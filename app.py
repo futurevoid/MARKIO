@@ -3,6 +3,15 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
 import io, wave, time
+from audio_watermarking_ga import (
+    PRESETS as GA_PRESETS,
+    GeneticAlgorithm,
+    generate_watermark,
+    prepare_audio_source,
+    embed_watermark,
+    extract_watermark,
+    compute_objectives,
+)
 
 st.set_page_config(
     page_title="MARKIO | Audio Watermark Optimization",
@@ -201,116 +210,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-from audio_watermarking_ga import (
-    generate_audio,
-    generate_watermark,
-    load_real_audio,
-    embed_watermark,
-    extract_watermark,
-    compute_snr,
-    compute_objectives,
-    Individual,
-    non_dominated_sort,
-    crowding_distance as crowding_dist,
-    all_crowding as all_crowd,
-)
-
-
-def run_ga(audio, wm, cfg):
-    rng  = np.random.default_rng(cfg["seed"])
-    tau  = 1.0 / np.sqrt(6)
-    smin = 1e-5
-
-    pop = []
-    for _ in range(cfg["pop_size"]):
-        g = np.array([rng.uniform(*b) for b in Individual.BOUNDS])
-        pop.append(Individual(g))
-    for ind in pop: ind.evaluate(audio, wm)
-
-    ranks, fronts = non_dominated_sort(pop)
-    crowd         = all_crowd(pop, fronts)
-    hof           = max(pop, key=lambda x: x.balanced_score()).clone()
-    hof_score     = hof.balanced_score()
-    no_imp        = 0
-    hist          = dict(hof_snr=[], hof_acc=[], front0=[], div=[], restarts=[])
-
-    def tour(pop, ranks, crowd, k):
-        idx  = rng.choice(len(pop), size=k, replace=False)
-        best = int(idx[0])
-        for i in idx[1:]:
-            if ranks[i] < ranks[best]: best = int(i)
-            elif ranks[i] == ranks[best] and crowd.get(int(i), 0) > crowd.get(best, 0):
-                best = int(i)
-        return pop[best]
-
-    def sbx(p1, p2):
-        g1, g2 = p1.genes.copy(), p2.genes.copy()
-        s1, s2 = p1.sigmas.copy(), p2.sigmas.copy()
-        for d in range(3):
-            if rng.random() > cfg["cp"] or abs(g1[d]-g2[d]) < 1e-9: continue
-            u       = rng.random()
-            eta     = cfg["eta"]
-            b       = (2*u)**(1/(eta+1)) if u <= 0.5 else (1/(2*(1-u)))**(1/(eta+1))
-            lo, hi  = Individual.BOUNDS[d]
-            g1[d]   = np.clip(0.5*((1+b)*g1[d]+(1-b)*g2[d]), lo, hi)
-            g2[d]   = np.clip(0.5*((1-b)*g1[d]+(1+b)*g2[d]), lo, hi)
-            s1[d]   = s2[d] = 0.5*(p1.sigmas[d]+p2.sigmas[d])
-        return Individual(g1, s1), Individual(g2, s2)
-
-    def mutate(ind):
-        g = ind.genes.copy()
-        s = ind.sigmas.copy()
-        for d in range(3):
-            s[d]  = max(s[d]*np.exp(tau*rng.standard_normal()), smin)
-            lo, hi = Individual.BOUNDS[d]
-            g[d]  = np.clip(g[d]+s[d]*rng.standard_normal(), lo, hi)
-        return Individual(g, s)
-
-    for gen in range(cfg["generations"]):
-        ranks, fronts = non_dominated_sort(pop)
-        crowd         = all_crowd(pop, fronts)
-
-        for ind in pop:
-            if ind.balanced_score() > hof.balanced_score(): hof = ind.clone()
-
-        note = ""
-        if hof.balanced_score() > hof_score + 1e-4:
-            hof_score = hof.balanced_score()
-            no_imp    = 0
-        else:
-            no_imp += 1
-
-        if no_imp >= cfg["patience"]:
-            n_inj = max(1, int(cfg["inj_frac"]*cfg["pop_size"]))
-            order = sorted(range(len(pop)), key=lambda i: -ranks[i])
-            for i in order[:n_inj]:
-                pop[i] = Individual(np.array([rng.uniform(*b) for b in Individual.BOUNDS]))
-            for ind in pop:
-                if ind.snr == 0.0: ind.evaluate(audio, wm)
-            no_imp = 0
-            hist["restarts"].append(gen)
-            note = f"inject {n_inj}"
-
-        hist["hof_snr"].append(hof.snr)
-        hist["hof_acc"].append(hof.acc)
-        hist["front0"].append(len(fronts[0]) if fronts else 0)
-        hist["div"].append(float(np.std([p.alpha for p in pop])))
-
-        prog    = gen / max(cfg["generations"]-1, 1)
-        k       = max(2, round(cfg["k_min"]+prog*(cfg["k_max"]-cfg["k_min"])))
-        new_pop = [hof.clone()]
-        while len(new_pop) < cfg["pop_size"]:
-            c1, c2 = sbx(tour(pop, ranks, crowd, k), tour(pop, ranks, crowd, k))
-            c1 = mutate(c1); c1.evaluate(audio, wm)
-            c2 = mutate(c2); c2.evaluate(audio, wm)
-            new_pop.extend([c1, c2])
-        pop = new_pop[:cfg["pop_size"]]
-
-        yield gen+1, hof.clone(), hist.copy(), note, None, None
-
-    ranks, fronts = non_dominated_sort(pop)
-    pareto        = [pop[i] for i in fronts[0]] if fronts else []
-    yield cfg["generations"], hof.clone(), hist, "__done__", pop, pareto
 
 
 BG    = "#12141f"; PANEL = "#1c1f30"
@@ -365,9 +264,9 @@ def chart_convergence(hist):
     return fig
 
 def chart_front_size(hist):
-    g   = list(range(1, len(hist["front0"])+1))
+    g   = list(range(1, len(hist["front0_size"])+1))
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=g, y=hist["front0"], name="Pareto front size",
+    fig.add_trace(go.Scatter(x=g, y=hist["front0_size"], name="Pareto front size",
                              line=dict(color=AMBER, width=1.6),
                              fill="tozeroy", fillcolor="rgba(255,204,68,0.07)"))
     fig.add_trace(go.Scatter(x=g, y=[d*100 for d in hist["div"]],
@@ -483,13 +382,13 @@ def gene_html(hof):
             f'</div>{rows}</div>')
 
 
-PRESETS = {
-    "Quick":    dict(pop_size=20, n_gens=30,  sbx_eta=5,  k_min=2, k_max=4,  patience=8,  inj_frac=0.30),
-    "Balanced": dict(pop_size=40, n_gens=80,  sbx_eta=5,  k_min=2, k_max=6,  patience=12, inj_frac=0.30),
-    "Thorough": dict(pop_size=60, n_gens=120, sbx_eta=10, k_min=2, k_max=8,  patience=18, inj_frac=0.25),
+PRESET_LABELS = {
+    "Quick": "quick",
+    "Balanced": "balanced",
+    "Complete": "complete",
 }
 
-if "preset" not in st.session_state or st.session_state.preset not in PRESETS:
+if "preset" not in st.session_state or st.session_state.preset not in PRESET_LABELS:
     st.session_state.preset = "Balanced"
 
 with st.sidebar:
@@ -505,35 +404,36 @@ with st.sidebar:
 
     # ── Presets ──────────────────────────────────────────────────
     st.markdown('<div class="sec">Preset</div>', unsafe_allow_html=True)
-    chosen_preset = st.radio("Preset", list(PRESETS.keys()),
-                             index=list(PRESETS.keys()).index(st.session_state.preset),
+    chosen_preset = st.radio("Preset", list(PRESET_LABELS.keys()),
+                             index=list(PRESET_LABELS.keys()).index(st.session_state.preset),
                              horizontal=True, label_visibility="collapsed")
     st.session_state.preset = chosen_preset
-    P = PRESETS[chosen_preset]
+    P = GA_PRESETS[PRESET_LABELS[chosen_preset]]
 
     # ── Audio ────────────────────────────────────────────────────
     st.markdown('<div class="sec">Audio</div>', unsafe_allow_html=True)
-    audio_src = st.radio("Audio source", ["Synthetic", "Upload WAV"],
+    audio_src = st.radio("Audio source", ["Generate audio", "Upload audio (WAV)"],
                          horizontal=True, label_visibility="collapsed")
     uploaded_wav = None
-    if audio_src == "Upload WAV":
+    if audio_src == "Upload audio (WAV)":
         uploaded_wav = st.file_uploader(
             "Audio file (WAV, AIFF, FLAC)", type=["wav", "aif", "aiff", "flac"],
             help="Any sample rate — will be resampled to the rate selected below.")
         if uploaded_wav is not None:
             st.success(f"Loaded {uploaded_wav.name}")
 
-    sr      = st.selectbox("Sample rate (Hz)", [8000, 16000], index=0)
-    if audio_src == "Synthetic":
+    sr = st.selectbox("Sample rate (Hz)", [8000, 16000], index=0)
+    if audio_src == "Generate audio":
         duration = st.slider("Duration (s)", 1.0, 4.0, 2.0, 0.5)
     else:
         duration = None
     wm_bits = st.selectbox("Watermark bits", [32, 64, 128], index=1)
 
+
     # ── GA Parameters ────────────────────────────────────────────
     st.markdown('<div class="sec">GA Parameters</div>', unsafe_allow_html=True)
     pop_size = st.slider("Population size",      10,  80,  P["pop_size"], 5)
-    n_gens   = st.slider("Generations",          20,  120, P["n_gens"],  10)
+    n_gens   = st.slider("Generations",          20,  120, P["generations"],  10)
 
     with st.expander("Advanced"):
         sbx_eta  = st.slider("SBX eta",               1,   20,  P["sbx_eta"])
@@ -544,7 +444,11 @@ with st.sidebar:
         seed     = st.number_input("Random seed",      0,   999, 0, 1)
 
     st.markdown("")
-    run_btn = st.button("Run MARKIO Optimization", type="primary", use_container_width=True)
+    run_btn = st.button(
+        "Run MARKIO Optimization",
+        type="primary",
+        use_container_width=True,
+    )
     st.divider()
     st.markdown("""<div style="color:#8890aa;font-size:.74rem;line-height:1.7">
     <b style="color:#dde1f0">MARKIO chromosome</b><br>
@@ -576,22 +480,34 @@ if run_btn:
     st.session_state.results = None
 
     # ── Audio source ──────────────────────────────────────────────
-    if audio_src == "Upload WAV":
+    source_mode = "generate" if audio_src == "Generate audio" else "wav"
+    if source_mode == "wav":
         if uploaded_wav is None:
             st.error("Please upload an audio file before running the GA.")
             st.stop()
         with st.spinner("Loading audio…"):
-            audio, sample_rate = load_real_audio(uploaded_wav, sr)
+            audio, sample_rate, source_label = prepare_audio_source(
+                source_mode, uploaded_wav, sr, duration)
         st.info(f"MARKIO source loaded: **{uploaded_wav.name}** — "
                 f"{len(audio)/sample_rate:.2f}s · {sample_rate} Hz · "
                 f"{len(audio):,} samples")
     else:
-        audio, sample_rate = generate_audio(duration=duration, sample_rate=sr)
+        audio, sample_rate, source_label = prepare_audio_source(
+            source_mode, None, sr, duration)
     # ─────────────────────────────────────────────────────────────
     watermark = generate_watermark(length=wm_bits)
-    cfg = dict(pop_size=pop_size, generations=n_gens, eta=sbx_eta,
-               cp=0.85, k_min=k_min, k_max=k_max,
-               patience=patience, inj_frac=inj_frac, seed=int(seed))
+    ga = GeneticAlgorithm(
+        pop_size=pop_size,
+        generations=n_gens,
+        sbx_eta=sbx_eta,
+        crossover_prob=0.85,
+        tournament_k_min=k_min,
+        tournament_k_max=k_max,
+        stagnation_patience=patience,
+        injection_frac=inj_frac,
+        seed=int(seed),
+        verbose=False,
+    )
     b_snr, b_acc = compute_objectives(0.05, 1.0, 1, audio, watermark)
 
     prog      = st.progress(0, text="Initializing MARKIO population...")
@@ -601,7 +517,7 @@ if run_btn:
     t0        = time.time()
     hof = pareto_front = final_pop = hist = None
 
-    for result in run_ga(audio, watermark, cfg):
+    for result in ga.iter_run(audio, watermark):
         if result[3] == "__done__":
             _, hof, hist, _, final_pop, pareto_front = result
             break
@@ -622,7 +538,7 @@ if run_btn:
             f'<div class="live-sep">|</div>'
             f'<div><div class="live-lbl">Alpha</div><div class="live-val" style="color:#ffcc44">{hof.alpha:.5f}</div></div>'
             f'<div class="live-sep">|</div>'
-            f'<div><div class="live-lbl">Pareto front</div><div class="live-val" style="color:#b57bee">{len(hist["front0"])} gen</div></div>'
+            f'<div><div class="live-lbl">Pareto front</div><div class="live-val" style="color:#b57bee">{hist["front0_size"][-1]} gen</div></div>'
             f'</div>', unsafe_allow_html=True)
         log_slot.markdown('<div class="log-box">' + "<br>".join(log_rows) + "</div>",
                           unsafe_allow_html=True)
@@ -635,7 +551,7 @@ if run_btn:
         hof=hof, hist=hist, pareto_front=pareto_front,
         final_pop=final_pop, b_snr=b_snr, b_acc=b_acc,
         audio_src=audio_src,
-        audio_name=uploaded_wav.name if audio_src == "Upload WAV" and uploaded_wav else None)
+        audio_name=source_label)
     st.rerun()
 
 if st.session_state.results:
@@ -651,7 +567,7 @@ if st.session_state.results:
     noise   = wm_opt - audio
 
     # ── Source banner ─────────────────────────────────────────────
-    if R.get("audio_src") == "Upload WAV" and R.get("audio_name"):
+    if R.get("audio_name"):
         st.info(f"MARKIO source: **{R['audio_name']}**  ·  "
                 f"{len(audio)/sr_val:.2f}s  ·  {sr_val} Hz  ·  {len(audio):,} samples")
 

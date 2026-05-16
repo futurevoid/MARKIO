@@ -132,6 +132,24 @@ def generate_audio(duration=2.0, sample_rate=8000, seed=42):
     return sig / np.max(np.abs(sig)), sample_rate
 
 
+def prepare_audio_source(source_mode, audio_file=None, sample_rate=8000, duration=2.0):
+    if source_mode not in {"generate", "wav"}:
+        raise ValueError("source_mode must be 'generate' or 'wav'.")
+
+    if source_mode == "generate":
+        if audio_file is not None:
+            raise ValueError("Generated audio mode does not accept an audio file.")
+        audio, sr = generate_audio(duration=duration, sample_rate=sample_rate)
+        return audio, sr, "generated audio"
+
+    if audio_file is None:
+        raise ValueError("Real audio mode requires an audio file.")
+
+    audio, sr = load_real_audio(audio_file, sample_rate)
+    label = getattr(audio_file, "name", os.path.basename(str(audio_file)))
+    return audio, sr, label
+
+
 def generate_watermark(length=64, seed=7):
     return np.random.default_rng(seed).integers(0, 2, size=length).astype(float)
 
@@ -421,8 +439,12 @@ class GeneticAlgorithm:
         sys.stdout.flush()
         self._panel_lines = len(lines)
 
+    def _hist_snapshot(self, hist):
+        return {k: v.copy() if hasattr(v, "copy") else v
+                for k, v in hist.items()}
+
     # Evolution loop
-    def run(self, audio, watermark):
+    def iter_run(self, audio, watermark):
         pop = self._init_population()
         for ind in pop: ind.evaluate(audio, watermark)
 
@@ -490,6 +512,8 @@ class GeneticAlgorithm:
                 new_pop.extend([c1, c2])
             pop = new_pop[:self.pop_size]
 
+            yield gen + 1, hof.clone(), self._hist_snapshot(hist), note, None, None
+
         ranks, fronts = non_dominated_sort(pop)
         pareto_front  = [pop[i] for i in fronts[0]] if fronts else []
 
@@ -506,7 +530,13 @@ class GeneticAlgorithm:
             _kv("Diversity injections",    str(len(hist["restarts"])))
             _kv("Wall time",               f"{time.perf_counter()-t0:.2f}s")
 
-        return hof, pareto_front, pop, hist
+        yield self.G, hof.clone(), self._hist_snapshot(hist), "__done__", pop, pareto_front
+
+    def run(self, audio, watermark):
+        for gen, hof, hist, note, final_pop, pareto_front in self.iter_run(audio, watermark):
+            if note == "__done__":
+                return hof, pareto_front, final_pop, hist
+        raise RuntimeError("Genetic algorithm did not produce a final result.")
 
 
 # Plots
@@ -676,17 +706,19 @@ def build_parser():
             f"{C.DIM}  Evolves a 3-gene chromosome [alpha x band x n_carriers]\n"
             f"  to jointly maximise SNR and Bit Accuracy (true Pareto front).{C.RESET}\n\n"
             f"{C.BYELLOW}  Examples:{C.RESET}\n"
-            f"    {C.BWHITE}python audio_watermarking_ga.py{C.RESET}\n"
-            f"    {C.BWHITE}python audio_watermarking_ga.py --audio track.wav --sr 16000{C.RESET}\n"
-            f"    {C.BWHITE}python audio_watermarking_ga.py --preset thorough --bits 128{C.RESET}\n"
-            f"    {C.BWHITE}python audio_watermarking_ga.py --pop 80 --gens 200 --seed 1337{C.RESET}\n"
-            f"    {C.BWHITE}python audio_watermarking_ga.py --no-plots --quiet{C.RESET}\n"
+            f"    {C.BWHITE}python audio_watermarking_ga.py --source generate{C.RESET}\n"
+            f"    {C.BWHITE}python audio_watermarking_ga.py --source wav --audio track.wav --sr 16000{C.RESET}\n"
+            f"    {C.BWHITE}python audio_watermarking_ga.py --source generate --preset thorough --bits 128{C.RESET}\n"
+            f"    {C.BWHITE}python audio_watermarking_ga.py --source generate --pop 80 --gens 200 --seed 1337{C.RESET}\n"
+            f"    {C.BWHITE}python audio_watermarking_ga.py --source generate --no-plots --quiet{C.RESET}\n"
         ),
     )
 
     aud = p.add_argument_group(f"{C.CYAN}audio{C.RESET}")
+    aud.add_argument("--source", choices=["generate", "wav"], required=True,
+                     help="Required audio source: generate synthetic audio or load a real audio file.")
     aud.add_argument("--audio", metavar="FILE",
-                     help="Input audio file (WAV / AIFF / FLAC). Omit for synthetic signal.")
+                     help="Input audio file (WAV / AIFF / FLAC). Required with --source wav.")
     aud.add_argument("--sr", type=int, default=8000, metavar="HZ",
                      choices=[8000, 16000, 22050, 44100],
                      help="Target sample rate Hz  (default: 8000)")
@@ -731,6 +763,11 @@ def main():
     parser = build_parser()
     args   = parser.parse_args()
 
+    if args.source == "wav" and not args.audio:
+        parser.error("--source wav requires --audio FILE.")
+    if args.source == "generate" and args.audio:
+        parser.error("--source generate cannot be used with --audio.")
+
     if not args.quiet:
         print_banner()
 
@@ -753,20 +790,18 @@ def main():
     if not args.quiet:
         _section("SYSTEM INIT", "◈")
 
-    if args.audio:
+    if args.source == "wav":
         if not os.path.isfile(args.audio):
             _err(f"File not found: {args.audio}")
             sys.exit(1)
         if not args.quiet:
             _info(f"Loading  {C.BWHITE}{args.audio}{C.RESET}  ->  target SR {args.sr} Hz")
-        audio, sr = load_real_audio(args.audio, args.sr)
-        src_label = os.path.basename(args.audio)
+        audio, sr, src_label = prepare_audio_source("wav", args.audio, args.sr, args.duration)
     else:
         if not args.quiet:
             _info(f"Generating synthetic signal  "
                   f"{C.BWHITE}{args.duration}s{C.RESET}  @  {args.sr} Hz  seed=42")
-        audio, sr = generate_audio(duration=args.duration, sample_rate=args.sr)
-        src_label = "synthetic"
+        audio, sr, src_label = prepare_audio_source("generate", None, args.sr, args.duration)
 
     watermark = generate_watermark(length=args.bits)
 
