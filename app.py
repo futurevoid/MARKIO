@@ -412,10 +412,10 @@ with st.sidebar:
 
     # ── Audio ────────────────────────────────────────────────────
     st.markdown('<div class="sec">Audio</div>', unsafe_allow_html=True)
-    audio_src = st.radio("Audio source", ["Generate audio", "Upload audio (WAV)"],
+    audio_src = st.radio("Audio source", ["Generate audio", "Upload audio"],
                          horizontal=True, label_visibility="collapsed")
     uploaded_wav = None
-    if audio_src == "Upload audio (WAV)":
+    if audio_src == "Upload audio":
         uploaded_wav = st.file_uploader(
             "Audio file (WAV, AIFF, FLAC)", type=["wav", "aif", "aiff", "flac"],
             help="Any sample rate — will be resampled to the rate selected below.")
