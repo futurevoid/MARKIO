@@ -5,44 +5,87 @@ import streamlit as st
 import io, wave, time
 
 st.set_page_config(
-    page_title="Audio Watermarking — MO-GA",
+    page_title="MARKIO | Audio Watermark Optimization",
     page_icon="🧬", layout="wide",
     initial_sidebar_state="expanded",
 )
 
 st.markdown("""
 <style>
-  /* ── Layout ─────────────────────────────────────────────────── */
-  .block-container { padding-top:2.5rem; padding-bottom:.6rem; }
-  div[data-testid="stSidebarContent"] { background:#12141f; }
-
-  /* ── Animated gradient title ─────────────────────────────────── */
-  .hero-title {
-    font-size:2rem; font-weight:800; letter-spacing:-.02em;
-    background: linear-gradient(90deg,#00d4ff,#b57bee,#6dffa0,#00d4ff);
-    background-size:300% 100%;
-    -webkit-background-clip:text; -webkit-text-fill-color:transparent;
-    animation: shimmer 5s linear infinite;
-    margin-bottom:.15rem;
+  :root {
+    --markio-bg:#10131d;
+    --markio-panel:#191d2b;
+    --markio-panel-2:#202536;
+    --markio-line:#2b3146;
+    --markio-text:#e5e9f7;
+    --markio-muted:#8d96b3;
+    --markio-cyan:#00d4ff;
+    --markio-amber:#ffcc44;
+    --markio-green:#6dffa0;
+    --markio-coral:#ff6b6b;
   }
-  @keyframes shimmer { 0%{background-position:0% 50%} 100%{background-position:300% 50%} }
-  .hero-sub { color:#8890aa; font-size:.92rem; margin-bottom:0; }
+
+  /* ── Layout ─────────────────────────────────────────────────── */
+  .block-container { padding-top:3.2rem; padding-bottom:.6rem; }
+  div[data-testid="stSidebarContent"] { background:var(--markio-bg); }
+
+  /* ── MARKIO identity ────────────────────────────────────────── */
+  .brand-lockup {
+    display:flex; align-items:center; gap:12px; margin:.15rem 0 1rem 0;
+  }
+  .brand-mark {
+    width:40px; height:40px; border:1px solid #00d4ff55; border-radius:8px;
+    display:grid; place-items:center; color:var(--markio-cyan);
+    font-size:1.45rem; font-weight:900; letter-spacing:-.04em;
+    background:linear-gradient(145deg,#172033,#0d1019);
+    box-shadow:0 0 24px rgba(0,212,255,.08), inset 0 0 16px rgba(0,212,255,.05);
+  }
+  .brand-name {
+    color:var(--markio-text); font-size:1.15rem; font-weight:900;
+    letter-spacing:.14em; line-height:1;
+  }
+  .brand-tag {
+    color:var(--markio-muted); font-size:.72rem; letter-spacing:.04em;
+    margin-top:5px;
+  }
+
+  /* ── Product hero ────────────────────────────────────────────── */
+  .hero-wrap {
+    border:1px solid var(--markio-line); border-radius:8px;
+    padding:22px 24px 20px 24px; margin-bottom:1rem;
+    background:
+      linear-gradient(90deg,rgba(0,212,255,.08),transparent 46%),
+      linear-gradient(180deg,#1a1f2f,#141824);
+  }
+  .hero-kicker {
+    color:var(--markio-cyan); font-size:.68rem; letter-spacing:.18em;
+    text-transform:uppercase; font-weight:800; margin-bottom:8px;
+  }
+  .hero-title {
+    color:var(--markio-text); font-size:2.45rem; font-weight:900;
+    letter-spacing:.06em; line-height:1; margin-bottom:.55rem;
+  }
+  .hero-sub { color:var(--markio-muted); font-size:.95rem; margin-bottom:0; max-width:920px; line-height:1.65; }
+  .hero-sub code {
+    color:var(--markio-text); background:#0c101a; border:1px solid #283044;
+    border-radius:6px; padding:1px 6px;
+  }
 
   /* ── Section headers ─────────────────────────────────────────── */
   .sec {
     display:flex; align-items:center; gap:8px;
     font-size:.7rem; letter-spacing:.12em; text-transform:uppercase;
-    color:#8890aa; margin:1.4rem 0 .5rem 0; font-weight:700;
+    color:var(--markio-muted); margin:1.4rem 0 .5rem 0; font-weight:700;
   }
   .sec::after {
     content:""; flex:1; height:1px;
-    background:linear-gradient(90deg,#2a2d40,transparent);
+    background:linear-gradient(90deg,var(--markio-line),transparent);
   }
 
   /* ── Metric cards ────────────────────────────────────────────── */
   .metric-card {
-    background:#1c1f30; border:1px solid #2a2d40;
-    border-radius:12px; padding:16px 14px; text-align:center;
+    background:var(--markio-panel); border:1px solid var(--markio-line);
+    border-radius:8px; padding:16px 14px; text-align:center;
     transition:border-color .2s, transform .2s, box-shadow .2s;
     position:relative; overflow:hidden;
   }
@@ -52,32 +95,32 @@ st.markdown("""
   }
   .metric-card::before {
     content:""; position:absolute; top:0; left:0; right:0; height:2px;
-    background:var(--accent, #00d4ff); opacity:.7;
+    background:var(--accent, var(--markio-cyan)); opacity:.78;
   }
   .metric-card .lbl {
-    color:#8890aa; font-size:.68rem; letter-spacing:.1em;
+    color:var(--markio-muted); font-size:.68rem; letter-spacing:.1em;
     text-transform:uppercase; margin-bottom:6px;
   }
   .metric-card .val {
-    color:var(--accent,#00d4ff); font-size:1.55rem;
+    color:var(--accent,var(--markio-cyan)); font-size:1.55rem;
     font-weight:800; font-family:monospace; line-height:1.1;
   }
-  .metric-card .sub { font-size:.73rem; margin-top:5px; color:#8890aa; }
-  .pos { color:#6dffa0; } .neg { color:#ff6b6b; } .neu { color:#8890aa; }
+  .metric-card .sub { font-size:.73rem; margin-top:5px; color:var(--markio-muted); }
+  .pos { color:var(--markio-green); } .neg { color:var(--markio-coral); } .neu { color:var(--markio-muted); }
 
   /* ── Gene chromosome ─────────────────────────────────────────── */
   .gene-wrap {
-    background:#1c1f30; border:1px solid #2a2d40;
-    border-radius:12px; padding:16px 20px; margin-top:10px;
+    background:var(--markio-panel); border:1px solid var(--markio-line);
+    border-radius:8px; padding:16px 20px; margin-top:10px;
   }
   .gene-header {
     display:flex; justify-content:space-between; align-items:center;
     margin-bottom:12px;
   }
-  .gene-lbl { color:#8890aa; font-size:.7rem; letter-spacing:.1em; text-transform:uppercase; }
-  .gene-score { color:#ffcc44; font-size:.75rem; font-family:monospace; }
+  .gene-lbl { color:var(--markio-muted); font-size:.7rem; letter-spacing:.1em; text-transform:uppercase; }
+  .gene-score { color:var(--markio-amber); font-size:.75rem; font-family:monospace; }
   .gene-row { display:flex; align-items:center; gap:10px; margin:7px 0; }
-  .gene-name { color:#dde1f0; font-size:.8rem; width:58px; font-family:monospace; }
+  .gene-name { color:var(--markio-text); font-size:.8rem; width:58px; font-family:monospace; }
   .gene-track {
     flex:1; background:#0e1019; border-radius:6px; height:13px;
     overflow:hidden; border:1px solid #1e2235;
@@ -87,12 +130,12 @@ st.markdown("""
     content:""; position:absolute; top:0; left:0; right:0; bottom:0;
     background:linear-gradient(90deg,transparent 60%,rgba(255,255,255,.15));
   }
-  .gene-val { color:#dde1f0; font-size:.78rem; width:100px; text-align:right; font-family:monospace; }
+  .gene-val { color:var(--markio-text); font-size:.78rem; width:100px; text-align:right; font-family:monospace; }
 
   /* ── Log box ─────────────────────────────────────────────────── */
   .log-box {
-    background:#0a0c14; border:1px solid #1e2235;
-    border-radius:10px; padding:12px 14px; font-family:"JetBrains Mono",monospace;
+    background:#0a0c14; border:1px solid var(--markio-line);
+    border-radius:8px; padding:12px 14px; font-family:"JetBrains Mono",monospace;
     font-size:.73rem; color:#b0b8d0; max-height:240px;
     overflow-y:auto; line-height:1.7;
     scrollbar-width:thin; scrollbar-color:#2a2d40 transparent;
@@ -111,22 +154,22 @@ st.markdown("""
 
   /* ── Live metrics strip ──────────────────────────────────────── */
   .live-strip {
-    display:flex; gap:16px; background:#1c1f30;
-    border:1px solid #2a2d40; border-radius:10px;
+    display:flex; gap:16px; background:var(--markio-panel);
+    border:1px solid var(--markio-line); border-radius:8px;
     padding:10px 18px; margin:10px 0; align-items:center;
   }
-  .live-lbl { color:#8890aa; font-size:.72rem; text-transform:uppercase; letter-spacing:.08em; }
-  .live-val { color:#00d4ff; font-size:1.15rem; font-weight:700; font-family:monospace; }
+  .live-lbl { color:var(--markio-muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.08em; }
+  .live-val { color:var(--markio-cyan); font-size:1.15rem; font-weight:700; font-family:monospace; }
   .live-sep { color:#2a2d40; font-size:1.2rem; }
 
   /* ── Audio player card ───────────────────────────────────────── */
   .audio-card {
-    background:#1c1f30; border:1px solid #2a2d40; border-radius:12px;
+    background:var(--markio-panel); border:1px solid var(--markio-line); border-radius:8px;
     padding:14px 16px; margin-bottom:4px;
   }
   .audio-card-lbl {
     font-size:.72rem; letter-spacing:.08em; text-transform:uppercase;
-    color:#8890aa; margin-bottom:8px; display:flex; align-items:center; gap:6px;
+    color:var(--markio-muted); margin-bottom:8px; display:flex; align-items:center; gap:6px;
   }
   .dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
 
@@ -136,18 +179,23 @@ st.markdown("""
   /* ── Feature cards (empty state) ────────────────────────────── */
   .feat-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:20px; }
   .feat-card {
-    background:#1c1f30; border:1px solid #2a2d40; border-radius:12px; padding:16px;
+    background:var(--markio-panel); border:1px solid var(--markio-line); border-radius:8px; padding:16px;
   }
-  .feat-icon { font-size:1.4rem; margin-bottom:8px; }
-  .feat-title { color:#dde1f0; font-size:.85rem; font-weight:700; margin-bottom:4px; }
-  .feat-desc { color:#8890aa; font-size:.76rem; line-height:1.5; }
+  .feat-icon { color:var(--markio-cyan); font-size:.68rem; letter-spacing:.16em; text-transform:uppercase; font-weight:800; margin-bottom:8px; }
+  .feat-title { color:var(--markio-text); font-size:.85rem; font-weight:700; margin-bottom:4px; }
+  .feat-desc { color:var(--markio-muted); font-size:.76rem; line-height:1.5; }
 
   /* ── Tab styling ─────────────────────────────────────────────── */
   button[data-baseweb="tab"] {
     font-size:.8rem !important; padding:6px 14px !important;
   }
   button[data-baseweb="tab"][aria-selected="true"] {
-    color:#00d4ff !important; border-bottom-color:#00d4ff !important;
+    color:var(--markio-cyan) !important; border-bottom-color:var(--markio-cyan) !important;
+  }
+  @media (max-width: 760px) {
+    .hero-title { font-size:2rem; }
+    .feat-grid { grid-template-columns:1fr; }
+    .live-strip { flex-wrap:wrap; }
   }
 </style>
 """, unsafe_allow_html=True)
@@ -430,22 +478,30 @@ def gene_html(hof):
         for n, v, c, lv in zip(names, norms, colors, vals))
     return (f'<div class="gene-wrap">'
             f'<div class="gene-header">'
-            f'<div class="gene-lbl">🧬 HoF Chromosome</div>'
+            f'<div class="gene-lbl">MARKIO HoF Chromosome</div>'
             f'<div class="gene-score">balanced score {score:.4f}</div>'
             f'</div>{rows}</div>')
 
 
 PRESETS = {
-    "⚡ Quick":    dict(pop_size=20, n_gens=30,  sbx_eta=5,  k_min=2, k_max=4,  patience=8,  inj_frac=0.30),
-    "⚖️ Balanced": dict(pop_size=40, n_gens=80,  sbx_eta=5,  k_min=2, k_max=6,  patience=12, inj_frac=0.30),
-    "🔬 Thorough": dict(pop_size=60, n_gens=120, sbx_eta=10, k_min=2, k_max=8,  patience=18, inj_frac=0.25),
+    "Quick":    dict(pop_size=20, n_gens=30,  sbx_eta=5,  k_min=2, k_max=4,  patience=8,  inj_frac=0.30),
+    "Balanced": dict(pop_size=40, n_gens=80,  sbx_eta=5,  k_min=2, k_max=6,  patience=12, inj_frac=0.30),
+    "Thorough": dict(pop_size=60, n_gens=120, sbx_eta=10, k_min=2, k_max=8,  patience=18, inj_frac=0.25),
 }
 
-if "preset" not in st.session_state:
-    st.session_state.preset = "⚖️ Balanced"
+if "preset" not in st.session_state or st.session_state.preset not in PRESETS:
+    st.session_state.preset = "Balanced"
 
 with st.sidebar:
-    st.markdown("## 🧬 MO-GA Watermarking")
+    st.markdown("""
+    <div class="brand-lockup">
+      <div class="brand-mark">🧬</div>
+      <div>
+        <div class="brand-name">MARKIO</div>
+        <div class="brand-tag">Audio watermark optimization</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     # ── Presets ──────────────────────────────────────────────────
     st.markdown('<div class="sec">Preset</div>', unsafe_allow_html=True)
@@ -465,7 +521,7 @@ with st.sidebar:
             "Audio file (WAV, AIFF, FLAC)", type=["wav", "aif", "aiff", "flac"],
             help="Any sample rate — will be resampled to the rate selected below.")
         if uploaded_wav is not None:
-            st.success(f"✓ {uploaded_wav.name}")
+            st.success(f"Loaded {uploaded_wav.name}")
 
     sr      = st.selectbox("Sample rate (Hz)", [8000, 16000], index=0)
     if audio_src == "Synthetic":
@@ -488,29 +544,30 @@ with st.sidebar:
         seed     = st.number_input("Random seed",      0,   999, 0, 1)
 
     st.markdown("")
-    run_btn = st.button("▶  Run GA", type="primary", use_container_width=True)
+    run_btn = st.button("Run MARKIO Optimization", type="primary", use_container_width=True)
     st.divider()
     st.markdown("""<div style="color:#8890aa;font-size:.74rem;line-height:1.7">
-    <b style="color:#dde1f0">3-gene chromosome</b><br>
+    <b style="color:#dde1f0">MARKIO chromosome</b><br>
     <span style="color:#00d4ff">alpha</span> · embedding strength<br>
     <span style="color:#ffcc44">band</span> · carrier bandwidth<br>
     <span style="color:#6dffa0">nc</span> · carriers per bit<br><br>
-    <b style="color:#dde1f0">Multi-objective selection</b><br>
+    <b style="color:#dde1f0">Optimization engine</b><br>
     Non-dominated sorting + crowding distance.<br>
     No weighted sum — SNR and accuracy treated independently.
     </div>""", unsafe_allow_html=True)
 
 
-st.markdown('<div class="hero-title">🧬 Audio Watermarking — Multi-Objective GA</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="hero-sub">A <b style="color:#dde1f0">3-gene chromosome</b> '
-    '<code>[alpha · band · n_carriers]</code> evolved to jointly '
-    '<b style="color:#ff6b6b">maximise SNR</b> and '
-    '<b style="color:#6dffa0">Bit Accuracy</b> via non-dominated sorting — '
-    'no scalar weighting, a true Pareto front.</div>',
+    '<div class="hero-wrap">'
+    '<div class="hero-kicker">Secure signal lab</div>'
+    '<div class="hero-title">MARKIO</div>'
+    '<div class="hero-sub">A multi-objective audio watermarking workspace that evolves '
+    '<b style="color:#e5e9f7">[alpha · band · n_carriers]</b> to balance '
+    '<b style="color:#ff6b6b">signal fidelity</b> and '
+    '<b style="color:#6dffa0">bit recovery</b>. MARKIO builds the Pareto front directly, '
+    'so robustness and imperceptibility stay visible as independent objectives.</div>'
+    '</div>',
     unsafe_allow_html=True)
-st.markdown("<div style='margin-bottom:.8rem'></div>", unsafe_allow_html=True)
-st.divider()
 
 if "results" not in st.session_state:
     st.session_state.results = None
@@ -525,7 +582,7 @@ if run_btn:
             st.stop()
         with st.spinner("Loading audio…"):
             audio, sample_rate = load_real_audio(uploaded_wav, sr)
-        st.info(f"🎵 Loaded **{uploaded_wav.name}** — "
+        st.info(f"MARKIO source loaded: **{uploaded_wav.name}** — "
                 f"{len(audio)/sample_rate:.2f}s · {sample_rate} Hz · "
                 f"{len(audio):,} samples")
     else:
@@ -537,7 +594,7 @@ if run_btn:
                patience=patience, inj_frac=inj_frac, seed=int(seed))
     b_snr, b_acc = compute_objectives(0.05, 1.0, 1, audio, watermark)
 
-    prog      = st.progress(0, text="Initialising population…")
+    prog      = st.progress(0, text="Initializing MARKIO population...")
     live_slot = st.empty()
     log_slot  = st.empty()
     log_rows  = []
@@ -556,7 +613,7 @@ if run_btn:
         log_rows.append(row)
         if len(log_rows) > 50: log_rows.pop(0)
         pct = gen / n_gens
-        prog.progress(pct, text=f"Generation {gen} / {n_gens}  ·  {pct*100:.0f}%")
+        prog.progress(pct, text=f"MARKIO generation {gen} / {n_gens}  ·  {pct*100:.0f}%")
         live_slot.markdown(
             f'<div class="live-strip">'
             f'<div><div class="live-lbl">SNR</div><div class="live-val">{hof.snr:.2f} dB</div></div>'
@@ -571,7 +628,7 @@ if run_btn:
                           unsafe_allow_html=True)
 
     elapsed = time.time() - t0
-    prog.progress(1.0, text=f"✓  Done in {elapsed:.1f}s — Pareto front: {len(pareto_front)} solutions")
+    prog.progress(1.0, text=f"MARKIO complete in {elapsed:.1f}s — Pareto front: {len(pareto_front)} solutions")
     live_slot.empty()
     st.session_state.results = dict(
         audio=audio, sr=sample_rate, watermark=watermark,
@@ -595,11 +652,11 @@ if st.session_state.results:
 
     # ── Source banner ─────────────────────────────────────────────
     if R.get("audio_src") == "Upload WAV" and R.get("audio_name"):
-        st.info(f"🎵 Real audio — **{R['audio_name']}**  ·  "
+        st.info(f"MARKIO source: **{R['audio_name']}**  ·  "
                 f"{len(audio)/sr_val:.2f}s  ·  {sr_val} Hz  ·  {len(audio):,} samples")
 
     # ── Metric cards ──────────────────────────────────────────────
-    st.markdown('<div class="sec">📊 Results</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec">MARKIO Results</div>', unsafe_allow_html=True)
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     with c1: st.markdown(mcard("SNR", f"{hof.snr:.1f} dB",
         f"{d_snr:+.1f} dB vs baseline", d_snr >= 0, "#ff6b6b"), unsafe_allow_html=True)
@@ -619,11 +676,11 @@ if st.session_state.results:
 
     # ── Tabs ──────────────────────────────────────────────────────
     t1, t2, t3, t4, t5 = st.tabs([
-        "🌊  Waveforms",
-        "📈  Convergence",
-        "🎯  Pareto Front",
-        "🔬  Gene Sweeps",
-        "🔢  Bit Recovery",
+        "Waveforms",
+        "Convergence",
+        "Pareto Front",
+        "Gene Sweeps",
+        "Bit Recovery",
     ])
 
     with t1:
@@ -653,9 +710,9 @@ if st.session_state.results:
         # Download button
         st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
         st.download_button(
-            "⬇️  Download watermarked audio",
+            "Download MARKIO watermarked audio",
             data=to_wav(wm_opt, sr_val),
-            file_name="watermarked.wav",
+            file_name="markio_watermarked.wav",
             mime="audio/wav",
             use_container_width=False,
         )
@@ -680,35 +737,37 @@ if st.session_state.results:
 else:
     st.markdown("""
     <div style="text-align:center;padding:40px 0 24px 0">
-      <div style="font-size:3rem;margin-bottom:10px">🧬</div>
-      <div style="font-size:1.2rem;font-weight:800;color:#dde1f0;margin-bottom:6px">
-        Configure the sidebar and press <span style="color:#00d4ff">▶ Run GA</span>
+      <div style="font-size:.72rem;letter-spacing:.18em;text-transform:uppercase;font-weight:800;color:#00d4ff;margin-bottom:10px">
+        MARKIO READY
+      </div>
+      <div style="font-size:1.2rem;font-weight:800;color:#e5e9f7;margin-bottom:6px">
+        Configure the sidebar and run <span style="color:#00d4ff">MARKIO Optimization</span>
       </div>
       <div style="color:#8890aa;font-size:.88rem">
-        The GA will evolve a 3-gene chromosome and build a true Pareto front.
+        The engine will evolve a 3-gene watermark profile and build a true Pareto front.
       </div>
     </div>
     <div class="feat-grid">
       <div class="feat-card">
-        <div class="feat-icon">🔇</div>
-        <div class="feat-title">Imperceptible Embedding</div>
-        <div class="feat-desc">Spread-spectrum carriers keep the watermark inaudible.
-        SNR is maximised as a first-class objective — not a constraint.</div>
+        <div class="feat-icon">Signal</div>
+        <div class="feat-title">Imperceptible Watermarking</div>
+        <div class="feat-desc">MARKIO tunes spread-spectrum carriers to protect fidelity.
+        SNR is maximised as a first-class objective, not hidden as a constraint.</div>
       </div>
       <div class="feat-card">
-        <div class="feat-icon">🛡️</div>
-        <div class="feat-title">Noise Robustness</div>
+        <div class="feat-icon">Recovery</div>
+        <div class="feat-title">Robust Bit Recovery</div>
         <div class="feat-desc">Bit accuracy is evaluated after a Gaussian noise attack,
-        driving the GA to find embeddings that survive real-world degradation.</div>
+        pushing MARKIO toward profiles that survive real-world degradation.</div>
       </div>
       <div class="feat-card">
-        <div class="feat-icon">🎯</div>
+        <div class="feat-icon">Tradeoff</div>
         <div class="feat-title">True Pareto Front</div>
         <div class="feat-desc">Non-dominated sorting + crowding distance — no weighted sum.
         The output is a full trade-off curve you can navigate.</div>
       </div>
       <div class="feat-card">
-        <div class="feat-icon">🎵</div>
+        <div class="feat-icon">Source</div>
         <div class="feat-title">Real Audio Support</div>
         <div class="feat-desc">Upload your own WAV, AIFF, or FLAC file.
         Automatic mono conversion and resampling included.</div>
