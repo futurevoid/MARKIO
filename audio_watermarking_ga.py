@@ -1,14 +1,8 @@
-"""
-audio_watermarking_ga.py
-Multi-Objective Genetic Algorithm for audio watermark optimization.
-Shared core library — also usable as a standalone elite CLI tool.
-"""
-
 import numpy as np
 import matplotlib.pyplot as plt
 import os, sys, time, argparse, io
 
-# ── Optional deps (graceful fallback) ────────────────────────────────────────
+# Optional dependencies
 try:
     import soundfile as sf
     _HAS_SF = True
@@ -22,12 +16,9 @@ except ImportError:
     _HAS_SCIPY = False
 
 
-# ╔══════════════════════════════════════════════════════════════════════════╗
-# ║  ANSI TERMINAL UTILITIES                                                 ║
-# ╚══════════════════════════════════════════════════════════════════════════╝
+# Terminal colors
 
 class C:
-    """ANSI colour / style codes."""
     RESET   = "\033[0m"
     BOLD    = "\033[1m"
     DIM     = "\033[2m"
@@ -59,12 +50,12 @@ def _hbar(frac, width=30, color=None):
 
 BANNER = (
     f"\n{C.BCYAN}{C.BOLD}"
-    "  ██╗    ██╗ █████╗ ████████╗███████╗██████╗ ███╗   ███╗ █████╗ ██████╗ ██╗  ██╗\n"
-    "  ██║    ██║██╔══██╗╚══██╔══╝██╔════╝██╔══██╗████╗ ████║██╔══██╗██╔══██╗██║ ██╔╝\n"
-    "  ██║ █╗ ██║███████║   ██║   █████╗  ██████╔╝██╔████╔██║███████║██████╔╝█████╔╝ \n"
-    "  ██║███╗██║██╔══██║   ██║   ██╔══╝  ██╔══██╗██║╚██╔╝██║██╔══██║██╔══██╗██╔═██╗ \n"
-    "  ╚███╔███╔╝██║  ██║   ██║   ███████╗██║  ██║██║ ╚═╝ ██║██║  ██║██║  ██║██║  ██╗\n"
-    "   ╚══╝╚══╝ ╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝\n"
+    "  ███╗   ███╗ █████╗ ██████╗ ██╗  ██╗██╗ ██████╗ \n"
+    "  ████╗ ████║██╔══██╗██╔══██╗██║ ██╔╝██║██╔═══██╗\n"
+    "  ██╔████╔██║███████║██████╔╝█████╔╝ ██║██║   ██║\n"
+    "  ██║╚██╔╝██║██╔══██║██╔══██╗██╔═██╗ ██║██║   ██║\n"
+    "  ██║ ╚═╝ ██║██║  ██║██║  ██║██║  ██╗██║╚██████╔╝\n"
+    "  ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝ ╚═════╝ \n"
     f"{C.RESET}"
     f"{C.BMAGENTA}"
     "  ╔══════════════════════════════════════════════════════════════════════════════╗\n"
@@ -91,25 +82,9 @@ def _err(msg):  cprint(f"  {C.BRED}✘  {C.RESET}{msg}")
 def _info(msg): cprint(f"  {C.BCYAN}╌  {C.RESET}{msg}")
 
 
-# ╔══════════════════════════════════════════════════════════════════════════╗
-# ║  AUDIO I/O                                                               ║
-# ╚══════════════════════════════════════════════════════════════════════════╝
+# Audio I/O
 
 def load_real_audio(source, target_sr):
-    """
-    Load audio from a file path (str/Path) or a file-like object.
-    Converts to mono float32 in [-1, 1] and resamples to target_sr.
-
-    Parameters
-    ----------
-    source    : str | Path | file-like object (e.g. io.BytesIO, Streamlit UploadedFile)
-    target_sr : int   desired output sample rate
-
-    Returns
-    -------
-    sig       : np.ndarray  float32, mono, [-1, 1]
-    target_sr : int
-    """
     if not _HAS_SF:
         raise ImportError(
             "soundfile is required for real audio loading.\n"
@@ -117,17 +92,17 @@ def load_real_audio(source, target_sr):
         )
 
     if hasattr(source, "read"):
-        # File-like object (Streamlit UploadedFile, io.BytesIO, etc.)
+        # File-like input
         source.seek(0)
         sig, native_sr = sf.read(io.BytesIO(source.read()), dtype="float32", always_2d=False)
     else:
         sig, native_sr = sf.read(str(source), dtype="float32", always_2d=False)
 
-    # Stereo → mono
+    # Convert to mono
     if sig.ndim == 2:
         sig = sig.mean(axis=1)
 
-    # Resample if needed
+    # Resample
     if native_sr != target_sr:
         if not _HAS_SCIPY:
             raise ImportError(
@@ -137,7 +112,7 @@ def load_real_audio(source, target_sr):
         n_out = int(len(sig) * target_sr / native_sr)
         sig   = scipy_resample(sig, n_out).astype(np.float32)
 
-    # Normalise to [-1, 1]
+    # Normalize
     peak = np.max(np.abs(sig))
     if peak > 1e-6:
         sig /= peak
@@ -145,9 +120,7 @@ def load_real_audio(source, target_sr):
     return np.clip(sig, -1.0, 1.0), target_sr
 
 
-# ╔══════════════════════════════════════════════════════════════════════════╗
-# ║  SIGNAL PROCESSING CORE                                                  ║
-# ╚══════════════════════════════════════════════════════════════════════════╝
+# Signal processing
 
 def generate_audio(duration=2.0, sample_rate=8000, seed=42):
     rng = np.random.default_rng(seed)
@@ -216,9 +189,7 @@ def compute_objectives(alpha, band, n_carriers, audio, watermark,
     return snr, acc
 
 
-# ╔══════════════════════════════════════════════════════════════════════════╗
-# ║  INDIVIDUAL  (3-gene chromosome)                                         ║
-# ╚══════════════════════════════════════════════════════════════════════════╝
+# Individual
 
 class Individual:
     BOUNDS = np.array([[0.001, 0.15],
@@ -259,9 +230,7 @@ class Individual:
                 f"Acc={self.acc*100:.1f}%")
 
 
-# ╔══════════════════════════════════════════════════════════════════════════╗
-# ║  MULTI-OBJECTIVE SELECTION                                               ║
-# ╚══════════════════════════════════════════════════════════════════════════╝
+# Multi-objective selection
 
 def _dominates(a_snr, a_acc, b_snr, b_acc):
     return (a_snr >= b_snr and a_acc >= b_acc) and (a_snr > b_snr or a_acc > b_acc)
@@ -321,9 +290,7 @@ def all_crowding(pop, fronts):
     return crowd
 
 
-# ╔══════════════════════════════════════════════════════════════════════════╗
-# ║  GENETIC ALGORITHM                                                       ║
-# ╚══════════════════════════════════════════════════════════════════════════╝
+# Genetic algorithm
 
 class GeneticAlgorithm:
     def __init__(self,
@@ -349,9 +316,9 @@ class GeneticAlgorithm:
         self.sigma_min = 1e-5
         self.tau       = 1.0 / np.sqrt(2 * 3)
         self.verbose   = verbose
-        self._panel_lines = 0   # track lines written for in-place redraw
+        self._panel_lines = 0
 
-    # ── init ─────────────────────────────────────────────────────────────
+    # Init
     def _init_population(self):
         pop = []
         for _ in range(self.pop_size):
@@ -359,7 +326,7 @@ class GeneticAlgorithm:
             pop.append(Individual(genes))
         return pop
 
-    # ── operators ─────────────────────────────────────────────────────────
+    # Operators
     def _tournament(self, pop, ranks, crowd, k):
         idx  = self.rng.choice(len(pop), size=k, replace=False)
         best = int(idx[0])
@@ -408,12 +375,12 @@ class GeneticAlgorithm:
         progress = gen / max(self.G - 1, 1)
         return max(2, round(self.k_min + progress * (self.k_max - self.k_min)))
 
-    # ── live dashboard ────────────────────────────────────────────────────
+    # Dashboard
     def _render_panel(self, gen, hof, front0_size, div, note, elapsed):
         pct  = (gen + 1) / self.G
         prog = _bar(pct, width=32, color=C.BCYAN)
 
-        # normalised gene values for mini-bars
+        # Gene bars
         an = (hof.alpha - 0.001) / (0.15 - 0.001)
         bn = hof.band
         nn = (hof.genes[2] - 1.0) / 2.0
@@ -446,7 +413,7 @@ class GeneticAlgorithm:
             f"  {C.DIM}{'─' * 72}{C.RESET}",
         ]
 
-        # move cursor up to overwrite previous panel (after first render)
+        # Redraw panel
         if self._panel_lines:
             sys.stdout.write(f"\033[{self._panel_lines}A")
 
@@ -454,7 +421,7 @@ class GeneticAlgorithm:
         sys.stdout.flush()
         self._panel_lines = len(lines)
 
-    # ── main evolution loop ───────────────────────────────────────────────
+    # Evolution loop
     def run(self, audio, watermark):
         pop = self._init_population()
         for ind in pop: ind.evaluate(audio, watermark)
@@ -542,9 +509,7 @@ class GeneticAlgorithm:
         return hof, pareto_front, pop, hist
 
 
-# ╔══════════════════════════════════════════════════════════════════════════╗
-# ║  VISUALISATION                                                           ║
-# ╚══════════════════════════════════════════════════════════════════════════╝
+# Plots
 
 def plot_results(audio, watermark, hof, pareto_front, final_pop, hist, sr,
                  out_dir="./outputs"):
@@ -692,9 +657,7 @@ def plot_results(audio, watermark, hof, pareto_front, final_pop, hist, sr,
     save(fig, "10_band_sweep.png")
 
 
-# ╔══════════════════════════════════════════════════════════════════════════╗
-# ║  CLI ENTRY POINT                                                         ║
-# ╚══════════════════════════════════════════════════════════════════════════╝
+# CLI
 
 PRESETS = {
     "quick":    dict(pop_size=20, generations=30,  sbx_eta=5,  k_min=2, k_max=4,  patience=8,  inj_frac=0.30),
@@ -771,7 +734,7 @@ def main():
     if not args.quiet:
         print_banner()
 
-    # ── resolve GA config: preset base, then CLI overrides ───────────────
+    # GA config
     base = PRESETS[args.preset] if args.preset else PRESETS["balanced"]
     cfg  = dict(
         pop_size            = args.pop      or base["pop_size"],
@@ -786,7 +749,7 @@ def main():
         verbose             = not args.quiet,
     )
 
-    # ── audio loading ─────────────────────────────────────────────────────
+    # Load audio
     if not args.quiet:
         _section("SYSTEM INIT", "◈")
 
@@ -833,11 +796,11 @@ def main():
         _kv("Preset",      args.preset if args.preset else "balanced (default)")
         cprint()
 
-    # ── run ───────────────────────────────────────────────────────────────
+    # Run GA
     ga  = GeneticAlgorithm(**cfg)
     hof, pareto_front, final_pop, hist = ga.run(audio, watermark)
 
-    # ── delta vs baseline ─────────────────────────────────────────────────
+    # Compare baseline
     if not args.quiet:
         cprint()
         _section("DELTA VS BASELINE", "D")
@@ -847,7 +810,7 @@ def main():
         _kv("DAcc", f"{C.BGREEN if d_acc>=0 else C.BRED}{d_acc:+.2f}%{C.RESET}")
         _kv("Injections", str(len(hist["restarts"])))
 
-    # ── plots ─────────────────────────────────────────────────────────────
+    # Save plots
     if not args.no_plots:
         if not args.quiet:
             cprint()
