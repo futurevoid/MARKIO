@@ -1,0 +1,717 @@
+import numpy as np
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import streamlit as st
+import io, wave, time
+
+st.set_page_config(
+    page_title="Audio Watermarking — MO-GA",
+    page_icon="🧬", layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+st.markdown("""
+<style>
+  /* ── Layout ─────────────────────────────────────────────────── */
+  .block-container { padding-top:2.5rem; padding-bottom:.6rem; }
+  div[data-testid="stSidebarContent"] { background:#12141f; }
+
+  /* ── Animated gradient title ─────────────────────────────────── */
+  .hero-title {
+    font-size:2rem; font-weight:800; letter-spacing:-.02em;
+    background: linear-gradient(90deg,#00d4ff,#b57bee,#6dffa0,#00d4ff);
+    background-size:300% 100%;
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+    animation: shimmer 5s linear infinite;
+    margin-bottom:.15rem;
+  }
+  @keyframes shimmer { 0%{background-position:0% 50%} 100%{background-position:300% 50%} }
+  .hero-sub { color:#8890aa; font-size:.92rem; margin-bottom:0; }
+
+  /* ── Section headers ─────────────────────────────────────────── */
+  .sec {
+    display:flex; align-items:center; gap:8px;
+    font-size:.7rem; letter-spacing:.12em; text-transform:uppercase;
+    color:#8890aa; margin:1.4rem 0 .5rem 0; font-weight:700;
+  }
+  .sec::after {
+    content:""; flex:1; height:1px;
+    background:linear-gradient(90deg,#2a2d40,transparent);
+  }
+
+  /* ── Metric cards ────────────────────────────────────────────── */
+  .metric-card {
+    background:#1c1f30; border:1px solid #2a2d40;
+    border-radius:12px; padding:16px 14px; text-align:center;
+    transition:border-color .2s, transform .2s, box-shadow .2s;
+    position:relative; overflow:hidden;
+  }
+  .metric-card:hover {
+    border-color:#00d4ff44; transform:translateY(-2px);
+    box-shadow:0 6px 24px rgba(0,212,255,.08);
+  }
+  .metric-card::before {
+    content:""; position:absolute; top:0; left:0; right:0; height:2px;
+    background:var(--accent, #00d4ff); opacity:.7;
+  }
+  .metric-card .lbl {
+    color:#8890aa; font-size:.68rem; letter-spacing:.1em;
+    text-transform:uppercase; margin-bottom:6px;
+  }
+  .metric-card .val {
+    color:var(--accent,#00d4ff); font-size:1.55rem;
+    font-weight:800; font-family:monospace; line-height:1.1;
+  }
+  .metric-card .sub { font-size:.73rem; margin-top:5px; color:#8890aa; }
+  .pos { color:#6dffa0; } .neg { color:#ff6b6b; } .neu { color:#8890aa; }
+
+  /* ── Gene chromosome ─────────────────────────────────────────── */
+  .gene-wrap {
+    background:#1c1f30; border:1px solid #2a2d40;
+    border-radius:12px; padding:16px 20px; margin-top:10px;
+  }
+  .gene-header {
+    display:flex; justify-content:space-between; align-items:center;
+    margin-bottom:12px;
+  }
+  .gene-lbl { color:#8890aa; font-size:.7rem; letter-spacing:.1em; text-transform:uppercase; }
+  .gene-score { color:#ffcc44; font-size:.75rem; font-family:monospace; }
+  .gene-row { display:flex; align-items:center; gap:10px; margin:7px 0; }
+  .gene-name { color:#dde1f0; font-size:.8rem; width:58px; font-family:monospace; }
+  .gene-track {
+    flex:1; background:#0e1019; border-radius:6px; height:13px;
+    overflow:hidden; border:1px solid #1e2235;
+  }
+  .gene-fill { height:100%; border-radius:6px; position:relative; }
+  .gene-fill::after {
+    content:""; position:absolute; top:0; left:0; right:0; bottom:0;
+    background:linear-gradient(90deg,transparent 60%,rgba(255,255,255,.15));
+  }
+  .gene-val { color:#dde1f0; font-size:.78rem; width:100px; text-align:right; font-family:monospace; }
+
+  /* ── Log box ─────────────────────────────────────────────────── */
+  .log-box {
+    background:#0a0c14; border:1px solid #1e2235;
+    border-radius:10px; padding:12px 14px; font-family:"JetBrains Mono",monospace;
+    font-size:.73rem; color:#b0b8d0; max-height:240px;
+    overflow-y:auto; line-height:1.7;
+    scrollbar-width:thin; scrollbar-color:#2a2d40 transparent;
+  }
+  .log-box::-webkit-scrollbar { width:4px; }
+  .log-box::-webkit-scrollbar-track { background:transparent; }
+  .log-box::-webkit-scrollbar-thumb { background:#2a2d40; border-radius:4px; }
+
+  /* ── Badges ──────────────────────────────────────────────────── */
+  .badge {
+    display:inline-block; padding:2px 8px; border-radius:20px;
+    font-size:.67rem; font-weight:700; letter-spacing:.04em;
+  }
+  .b-g   { background:#0d2014; color:#6dffa0; border:1px solid #1d5a2a; }
+  .b-inj { background:#2d1f4a; color:#b57bee; border:1px solid #5a3a8a; }
+
+  /* ── Live metrics strip ──────────────────────────────────────── */
+  .live-strip {
+    display:flex; gap:16px; background:#1c1f30;
+    border:1px solid #2a2d40; border-radius:10px;
+    padding:10px 18px; margin:10px 0; align-items:center;
+  }
+  .live-lbl { color:#8890aa; font-size:.72rem; text-transform:uppercase; letter-spacing:.08em; }
+  .live-val { color:#00d4ff; font-size:1.15rem; font-weight:700; font-family:monospace; }
+  .live-sep { color:#2a2d40; font-size:1.2rem; }
+
+  /* ── Audio player card ───────────────────────────────────────── */
+  .audio-card {
+    background:#1c1f30; border:1px solid #2a2d40; border-radius:12px;
+    padding:14px 16px; margin-bottom:4px;
+  }
+  .audio-card-lbl {
+    font-size:.72rem; letter-spacing:.08em; text-transform:uppercase;
+    color:#8890aa; margin-bottom:8px; display:flex; align-items:center; gap:6px;
+  }
+  .dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
+
+  /* ── Preset buttons ──────────────────────────────────────────── */
+  .preset-row { display:flex; gap:6px; margin-bottom:8px; }
+
+  /* ── Feature cards (empty state) ────────────────────────────── */
+  .feat-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:20px; }
+  .feat-card {
+    background:#1c1f30; border:1px solid #2a2d40; border-radius:12px; padding:16px;
+  }
+  .feat-icon { font-size:1.4rem; margin-bottom:8px; }
+  .feat-title { color:#dde1f0; font-size:.85rem; font-weight:700; margin-bottom:4px; }
+  .feat-desc { color:#8890aa; font-size:.76rem; line-height:1.5; }
+
+  /* ── Tab styling ─────────────────────────────────────────────── */
+  button[data-baseweb="tab"] {
+    font-size:.8rem !important; padding:6px 14px !important;
+  }
+  button[data-baseweb="tab"][aria-selected="true"] {
+    color:#00d4ff !important; border-bottom-color:#00d4ff !important;
+  }
+</style>
+""", unsafe_allow_html=True)
+
+
+from audio_watermarking_ga import (
+    generate_audio,
+    generate_watermark,
+    load_real_audio,
+    embed_watermark,
+    extract_watermark,
+    compute_snr,
+    compute_objectives,
+    Individual,
+    non_dominated_sort,
+    crowding_distance as crowding_dist,
+    all_crowding as all_crowd,
+)
+
+
+def run_ga(audio, wm, cfg):
+    rng  = np.random.default_rng(cfg["seed"])
+    tau  = 1.0 / np.sqrt(6)
+    smin = 1e-5
+
+    pop = []
+    for _ in range(cfg["pop_size"]):
+        g = np.array([rng.uniform(*b) for b in Individual.BOUNDS])
+        pop.append(Individual(g))
+    for ind in pop: ind.evaluate(audio, wm)
+
+    ranks, fronts = non_dominated_sort(pop)
+    crowd         = all_crowd(pop, fronts)
+    hof           = max(pop, key=lambda x: x.balanced_score()).clone()
+    hof_score     = hof.balanced_score()
+    no_imp        = 0
+    hist          = dict(hof_snr=[], hof_acc=[], front0=[], div=[], restarts=[])
+
+    def tour(pop, ranks, crowd, k):
+        idx  = rng.choice(len(pop), size=k, replace=False)
+        best = int(idx[0])
+        for i in idx[1:]:
+            if ranks[i] < ranks[best]: best = int(i)
+            elif ranks[i] == ranks[best] and crowd.get(int(i), 0) > crowd.get(best, 0):
+                best = int(i)
+        return pop[best]
+
+    def sbx(p1, p2):
+        g1, g2 = p1.genes.copy(), p2.genes.copy()
+        s1, s2 = p1.sigmas.copy(), p2.sigmas.copy()
+        for d in range(3):
+            if rng.random() > cfg["cp"] or abs(g1[d]-g2[d]) < 1e-9: continue
+            u       = rng.random()
+            eta     = cfg["eta"]
+            b       = (2*u)**(1/(eta+1)) if u <= 0.5 else (1/(2*(1-u)))**(1/(eta+1))
+            lo, hi  = Individual.BOUNDS[d]
+            g1[d]   = np.clip(0.5*((1+b)*g1[d]+(1-b)*g2[d]), lo, hi)
+            g2[d]   = np.clip(0.5*((1-b)*g1[d]+(1+b)*g2[d]), lo, hi)
+            s1[d]   = s2[d] = 0.5*(p1.sigmas[d]+p2.sigmas[d])
+        return Individual(g1, s1), Individual(g2, s2)
+
+    def mutate(ind):
+        g = ind.genes.copy()
+        s = ind.sigmas.copy()
+        for d in range(3):
+            s[d]  = max(s[d]*np.exp(tau*rng.standard_normal()), smin)
+            lo, hi = Individual.BOUNDS[d]
+            g[d]  = np.clip(g[d]+s[d]*rng.standard_normal(), lo, hi)
+        return Individual(g, s)
+
+    for gen in range(cfg["generations"]):
+        ranks, fronts = non_dominated_sort(pop)
+        crowd         = all_crowd(pop, fronts)
+
+        for ind in pop:
+            if ind.balanced_score() > hof.balanced_score(): hof = ind.clone()
+
+        note = ""
+        if hof.balanced_score() > hof_score + 1e-4:
+            hof_score = hof.balanced_score()
+            no_imp    = 0
+        else:
+            no_imp += 1
+
+        if no_imp >= cfg["patience"]:
+            n_inj = max(1, int(cfg["inj_frac"]*cfg["pop_size"]))
+            order = sorted(range(len(pop)), key=lambda i: -ranks[i])
+            for i in order[:n_inj]:
+                pop[i] = Individual(np.array([rng.uniform(*b) for b in Individual.BOUNDS]))
+            for ind in pop:
+                if ind.snr == 0.0: ind.evaluate(audio, wm)
+            no_imp = 0
+            hist["restarts"].append(gen)
+            note = f"inject {n_inj}"
+
+        hist["hof_snr"].append(hof.snr)
+        hist["hof_acc"].append(hof.acc)
+        hist["front0"].append(len(fronts[0]) if fronts else 0)
+        hist["div"].append(float(np.std([p.alpha for p in pop])))
+
+        prog    = gen / max(cfg["generations"]-1, 1)
+        k       = max(2, round(cfg["k_min"]+prog*(cfg["k_max"]-cfg["k_min"])))
+        new_pop = [hof.clone()]
+        while len(new_pop) < cfg["pop_size"]:
+            c1, c2 = sbx(tour(pop, ranks, crowd, k), tour(pop, ranks, crowd, k))
+            c1 = mutate(c1); c1.evaluate(audio, wm)
+            c2 = mutate(c2); c2.evaluate(audio, wm)
+            new_pop.extend([c1, c2])
+        pop = new_pop[:cfg["pop_size"]]
+
+        yield gen+1, hof.clone(), hist.copy(), note, None, None
+
+    ranks, fronts = non_dominated_sort(pop)
+    pareto        = [pop[i] for i in fronts[0]] if fronts else []
+    yield cfg["generations"], hof.clone(), hist, "__done__", pop, pareto
+
+
+BG    = "#12141f"; PANEL = "#1c1f30"
+CYAN  = "#00d4ff"; CORAL = "#ff6b6b"
+GREEN = "#6dffa0"; AMBER = "#ffcc44"
+PURP  = "#b57bee"; GREY  = "#8890aa"
+
+def _base(fig, title="", h=300):
+    fig.update_layout(
+        title=dict(text=title, font=dict(color="#dde1f0", size=12)),
+        paper_bgcolor=BG, plot_bgcolor=PANEL,
+        font=dict(color=GREY, size=10), height=h,
+        margin=dict(l=48, r=16, t=38, b=38),
+        legend=dict(bgcolor=PANEL, bordercolor="#2a2d40", borderwidth=1, font=dict(size=9)),
+        xaxis=dict(gridcolor="#22263a", zerolinecolor="#22263a"),
+        yaxis=dict(gridcolor="#22263a", zerolinecolor="#22263a"))
+    return fig
+
+def chart_waves(audio, wm_audio, sr):
+    t   = np.linspace(0, len(audio)/sr, len(audio))[:2000]
+    fig = make_subplots(rows=1, cols=3,
+                        subplot_titles=["Original", "Watermarked", "Noise (difference)"])
+    for col, (y, c) in enumerate(
+        [(audio[:2000], CYAN), (wm_audio[:2000], CORAL), ((wm_audio-audio)[:2000], GREEN)], 1):
+        fig.add_trace(go.Scatter(x=t, y=y, mode="lines",
+                                 line=dict(color=c, width=0.8), showlegend=False), row=1, col=col)
+    fig.update_layout(paper_bgcolor=BG, plot_bgcolor=PANEL, height=210,
+                      margin=dict(l=32, r=8, t=30, b=30), font=dict(color=GREY, size=9))
+    for ax in ["xaxis", "xaxis2", "xaxis3", "yaxis", "yaxis2", "yaxis3"]:
+        fig.update_layout(**{ax: dict(gridcolor="#22263a", zerolinecolor="#22263a")})
+    fig.update_annotations(font_color="#dde1f0", font_size=10)
+    return fig
+
+def chart_convergence(hist):
+    g   = list(range(1, len(hist["hof_snr"])+1))
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    fig.add_trace(go.Scatter(x=g, y=hist["hof_snr"], name="SNR (dB)",
+                             line=dict(color=CORAL, width=1.8)), secondary_y=False)
+    fig.add_trace(go.Scatter(x=g, y=[a*100 for a in hist["hof_acc"]],
+                             name="Bit Accuracy (%)",
+                             line=dict(color=GREEN, width=1.8, dash="dash")), secondary_y=True)
+    for rg in hist["restarts"]:
+        fig.add_vline(x=rg+1, line=dict(color=PURP, width=1, dash="dot"))
+    fig.update_layout(paper_bgcolor=BG, plot_bgcolor=PANEL, height=300,
+                      margin=dict(l=50, r=52, t=38, b=38),
+                      title=dict(text="HoF Objectives per Generation",
+                                 font=dict(color="#dde1f0", size=12)),
+                      legend=dict(bgcolor=PANEL, bordercolor="#2a2d40"),
+                      xaxis=dict(gridcolor="#22263a", title="Generation"),
+                      yaxis=dict(gridcolor="#22263a", color=CORAL, title="SNR (dB)"),
+                      yaxis2=dict(gridcolor="#22263a", color=GREEN, title="Accuracy (%)"))
+    return fig
+
+def chart_front_size(hist):
+    g   = list(range(1, len(hist["front0"])+1))
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=g, y=hist["front0"], name="Pareto front size",
+                             line=dict(color=AMBER, width=1.6),
+                             fill="tozeroy", fillcolor="rgba(255,204,68,0.07)"))
+    fig.add_trace(go.Scatter(x=g, y=[d*100 for d in hist["div"]],
+                             name="Diversity x100",
+                             line=dict(color=PURP, width=1.4, dash="dash")))
+    for rg in hist["restarts"]:
+        fig.add_vline(x=rg+1, line=dict(color=PURP, width=1, dash="dot"),
+                      annotation_text="inject", annotation_font_color=PURP,
+                      annotation_font_size=8)
+    return _base(fig, "Pareto Front Size & Diversity")
+
+def chart_pareto(final_pop, pareto_front, hof):
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=[p.snr for p in final_pop],
+                             y=[p.acc*100 for p in final_pop],
+                             mode="markers", name="All individuals",
+                             marker=dict(color=GREY, size=5, opacity=0.35)))
+    pf = sorted(pareto_front, key=lambda p: p.snr)
+    fig.add_trace(go.Scatter(x=[p.snr for p in pf], y=[p.acc*100 for p in pf],
+                             mode="markers+lines", name="Pareto front (rank 0)",
+                             marker=dict(color=AMBER, size=8),
+                             line=dict(color=AMBER, width=1.2, dash="dot")))
+    fig.add_trace(go.Scatter(x=[hof.snr], y=[hof.acc*100], mode="markers",
+                             name="HoF (best balanced)",
+                             marker=dict(color=CYAN, size=14, symbol="star")))
+    return _base(fig, "Final Pareto Front — SNR vs Robustness  (no scalar weighting)", h=320)
+
+def chart_sweep(audio, wm, hof, gene="alpha"):
+    if gene == "alpha":
+        sweep = np.linspace(0.001, 0.15, 50)
+        snrs, accs = [], []
+        for a in sweep:
+            s, c = compute_objectives(a, hof.band, hof.n_carriers, audio, wm)
+            snrs.append(s); accs.append(c*100)
+        vline  = hof.alpha
+        label  = f"HoF alpha={hof.alpha:.4f}"
+        title  = f"alpha Sweep  (band={hof.band:.2f}, nc={hof.n_carriers})"
+        xlabel = "alpha"
+    else:
+        sweep = np.linspace(0.0, 1.0, 30)
+        snrs, accs = [], []
+        for b in sweep:
+            s, c = compute_objectives(hof.alpha, b, hof.n_carriers, audio, wm)
+            snrs.append(s); accs.append(c*100)
+        vline  = hof.band
+        label  = f"HoF band={hof.band:.2f}"
+        title  = f"Band Sweep  (alpha={hof.alpha:.4f}, nc={hof.n_carriers})"
+        xlabel = "band (0=narrow, 1=full)"
+
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    fig.add_trace(go.Scatter(x=sweep, y=snrs, name="SNR (dB)",
+                             line=dict(color=CORAL, width=1.5)), secondary_y=False)
+    fig.add_trace(go.Scatter(x=sweep, y=accs, name="Accuracy (%)",
+                             line=dict(color=GREEN, width=1.5, dash="dash")), secondary_y=True)
+    fig.add_vline(x=vline, line=dict(color=CYAN, width=1.3, dash="dash"),
+                  annotation_text=label, annotation_font_color=CYAN, annotation_font_size=9)
+    fig.update_layout(paper_bgcolor=BG, plot_bgcolor=PANEL, height=270,
+                      margin=dict(l=48, r=52, t=38, b=38),
+                      title=dict(text=title, font=dict(color="#dde1f0", size=12)),
+                      legend=dict(bgcolor=PANEL, bordercolor="#2a2d40"),
+                      xaxis=dict(gridcolor="#22263a", title=xlabel),
+                      yaxis=dict(gridcolor="#22263a", color=CORAL, title="SNR (dB)"),
+                      yaxis2=dict(gridcolor="#22263a", color=GREEN, title="Accuracy (%)"))
+    return fig
+
+def chart_bits(audio, wm, hof):
+    wma = embed_watermark(audio, wm, hof.alpha, hof.band, hof.n_carriers)
+    ext = extract_watermark(audio, wma, len(wm), hof.band, hof.n_carriers)
+    acc = np.mean(ext == wm) * 100
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=list(range(len(wm))), y=wm, name="Original",
+                         marker_color=CYAN, opacity=0.55, width=0.8))
+    fig.add_trace(go.Bar(x=list(range(len(wm))), y=ext, name="Extracted",
+                         marker_color=CORAL, opacity=0.9, width=0.4))
+    return _base(fig, f"Bit Recovery (clean signal) — Acc: {acc:.1f}%", h=260)
+
+
+def to_wav(sig, sr=8000):
+    buf = io.BytesIO()
+    pcm = np.int16(np.clip(sig, -1, 1) * 32767)
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1); wf.setsampwidth(2)
+        wf.setframerate(sr); wf.writeframes(pcm.tobytes())
+    return buf.getvalue()
+
+
+def mcard(label, value, delta=None, pos=True, accent="#00d4ff"):
+    d = ""
+    if delta is not None:
+        cls   = "pos" if pos else "neg"
+        arrow = "▲" if pos else "▼"
+        d     = f'<div class="sub {cls}">{arrow} {delta}</div>'
+    return (f'<div class="metric-card" style="--accent:{accent}">'
+            f'<div class="lbl">{label}</div>'
+            f'<div class="val">{value}</div>{d}</div>')
+
+def gene_html(hof):
+    norms  = [(hof.alpha-0.001)/(0.15-0.001), hof.band, (hof.genes[2]-1.0)/2.0]
+    names  = ["alpha", "band", "nc"]
+    vals   = [f"{hof.alpha:.5f}", f"{hof.band:.3f}", f"{hof.n_carriers}  (int)"]
+    colors = [CYAN, AMBER, GREEN]
+    score  = hof.balanced_score()
+    rows   = "".join(
+        f'<div class="gene-row">'
+        f'<div class="gene-name">{n}</div>'
+        f'<div class="gene-track"><div class="gene-fill" style="width:{v*100:.1f}%;background:{c}"></div></div>'
+        f'<div class="gene-val">{lv}</div></div>'
+        for n, v, c, lv in zip(names, norms, colors, vals))
+    return (f'<div class="gene-wrap">'
+            f'<div class="gene-header">'
+            f'<div class="gene-lbl">🧬 HoF Chromosome</div>'
+            f'<div class="gene-score">balanced score {score:.4f}</div>'
+            f'</div>{rows}</div>')
+
+
+PRESETS = {
+    "⚡ Quick":    dict(pop_size=20, n_gens=30,  sbx_eta=5,  k_min=2, k_max=4,  patience=8,  inj_frac=0.30),
+    "⚖️ Balanced": dict(pop_size=40, n_gens=80,  sbx_eta=5,  k_min=2, k_max=6,  patience=12, inj_frac=0.30),
+    "🔬 Thorough": dict(pop_size=60, n_gens=120, sbx_eta=10, k_min=2, k_max=8,  patience=18, inj_frac=0.25),
+}
+
+if "preset" not in st.session_state:
+    st.session_state.preset = "⚖️ Balanced"
+
+with st.sidebar:
+    st.markdown("## 🧬 MO-GA Watermarking")
+
+    # ── Presets ──────────────────────────────────────────────────
+    st.markdown('<div class="sec">Preset</div>', unsafe_allow_html=True)
+    chosen_preset = st.radio("Preset", list(PRESETS.keys()),
+                             index=list(PRESETS.keys()).index(st.session_state.preset),
+                             horizontal=True, label_visibility="collapsed")
+    st.session_state.preset = chosen_preset
+    P = PRESETS[chosen_preset]
+
+    # ── Audio ────────────────────────────────────────────────────
+    st.markdown('<div class="sec">Audio</div>', unsafe_allow_html=True)
+    audio_src = st.radio("Audio source", ["Synthetic", "Upload WAV"],
+                         horizontal=True, label_visibility="collapsed")
+    uploaded_wav = None
+    if audio_src == "Upload WAV":
+        uploaded_wav = st.file_uploader(
+            "Audio file (WAV, AIFF, FLAC)", type=["wav", "aif", "aiff", "flac"],
+            help="Any sample rate — will be resampled to the rate selected below.")
+        if uploaded_wav is not None:
+            st.success(f"✓ {uploaded_wav.name}")
+
+    sr      = st.selectbox("Sample rate (Hz)", [8000, 16000], index=0)
+    if audio_src == "Synthetic":
+        duration = st.slider("Duration (s)", 1.0, 4.0, 2.0, 0.5)
+    else:
+        duration = None
+    wm_bits = st.selectbox("Watermark bits", [32, 64, 128], index=1)
+
+    # ── GA Parameters ────────────────────────────────────────────
+    st.markdown('<div class="sec">GA Parameters</div>', unsafe_allow_html=True)
+    pop_size = st.slider("Population size",      10,  80,  P["pop_size"], 5)
+    n_gens   = st.slider("Generations",          20,  120, P["n_gens"],  10)
+
+    with st.expander("Advanced"):
+        sbx_eta  = st.slider("SBX eta",               1,   20,  P["sbx_eta"])
+        k_min    = st.slider("Tournament k min",       2,   4,   P["k_min"])
+        k_max    = st.slider("Tournament k max",       3,   10,  P["k_max"])
+        patience = st.slider("Stagnation patience",    5,   30,  P["patience"])
+        inj_frac = st.slider("Injection fraction",     0.1, 0.5, P["inj_frac"], 0.05)
+        seed     = st.number_input("Random seed",      0,   999, 0, 1)
+
+    st.markdown("")
+    run_btn = st.button("▶  Run GA", type="primary", use_container_width=True)
+    st.divider()
+    st.markdown("""<div style="color:#8890aa;font-size:.74rem;line-height:1.7">
+    <b style="color:#dde1f0">3-gene chromosome</b><br>
+    <span style="color:#00d4ff">alpha</span> · embedding strength<br>
+    <span style="color:#ffcc44">band</span> · carrier bandwidth<br>
+    <span style="color:#6dffa0">nc</span> · carriers per bit<br><br>
+    <b style="color:#dde1f0">Multi-objective selection</b><br>
+    Non-dominated sorting + crowding distance.<br>
+    No weighted sum — SNR and accuracy treated independently.
+    </div>""", unsafe_allow_html=True)
+
+
+st.markdown('<div class="hero-title">🧬 Audio Watermarking — Multi-Objective GA</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="hero-sub">A <b style="color:#dde1f0">3-gene chromosome</b> '
+    '<code>[alpha · band · n_carriers]</code> evolved to jointly '
+    '<b style="color:#ff6b6b">maximise SNR</b> and '
+    '<b style="color:#6dffa0">Bit Accuracy</b> via non-dominated sorting — '
+    'no scalar weighting, a true Pareto front.</div>',
+    unsafe_allow_html=True)
+st.markdown("<div style='margin-bottom:.8rem'></div>", unsafe_allow_html=True)
+st.divider()
+
+if "results" not in st.session_state:
+    st.session_state.results = None
+
+if run_btn:
+    st.session_state.results = None
+
+    # ── Audio source ──────────────────────────────────────────────
+    if audio_src == "Upload WAV":
+        if uploaded_wav is None:
+            st.error("Please upload an audio file before running the GA.")
+            st.stop()
+        with st.spinner("Loading audio…"):
+            audio, sample_rate = load_real_audio(uploaded_wav, sr)
+        st.info(f"🎵 Loaded **{uploaded_wav.name}** — "
+                f"{len(audio)/sample_rate:.2f}s · {sample_rate} Hz · "
+                f"{len(audio):,} samples")
+    else:
+        audio, sample_rate = generate_audio(duration=duration, sample_rate=sr)
+    # ─────────────────────────────────────────────────────────────
+    watermark = generate_watermark(length=wm_bits)
+    cfg = dict(pop_size=pop_size, generations=n_gens, eta=sbx_eta,
+               cp=0.85, k_min=k_min, k_max=k_max,
+               patience=patience, inj_frac=inj_frac, seed=int(seed))
+    b_snr, b_acc = compute_objectives(0.05, 1.0, 1, audio, watermark)
+
+    prog      = st.progress(0, text="Initialising population…")
+    live_slot = st.empty()
+    log_slot  = st.empty()
+    log_rows  = []
+    t0        = time.time()
+    hof = pareto_front = final_pop = hist = None
+
+    for result in run_ga(audio, watermark, cfg):
+        if result[3] == "__done__":
+            _, hof, hist, _, final_pop, pareto_front = result
+            break
+        gen, hof, hist, note = result[0], result[1], result[2], result[3]
+        nb  = f' <span class="badge b-inj">{note}</span>' if note else ""
+        row = (f'<span class="badge b-g">Gen {gen:>3}</span>  '
+               f'alpha={hof.alpha:.4f}  band={hof.band:.2f}  nc={hof.n_carriers}  '
+               f'SNR={hof.snr:.1f}dB  Acc={hof.acc*100:.1f}%{nb}')
+        log_rows.append(row)
+        if len(log_rows) > 50: log_rows.pop(0)
+        pct = gen / n_gens
+        prog.progress(pct, text=f"Generation {gen} / {n_gens}  ·  {pct*100:.0f}%")
+        live_slot.markdown(
+            f'<div class="live-strip">'
+            f'<div><div class="live-lbl">SNR</div><div class="live-val">{hof.snr:.2f} dB</div></div>'
+            f'<div class="live-sep">|</div>'
+            f'<div><div class="live-lbl">Bit Accuracy</div><div class="live-val" style="color:#6dffa0">{hof.acc*100:.1f}%</div></div>'
+            f'<div class="live-sep">|</div>'
+            f'<div><div class="live-lbl">Alpha</div><div class="live-val" style="color:#ffcc44">{hof.alpha:.5f}</div></div>'
+            f'<div class="live-sep">|</div>'
+            f'<div><div class="live-lbl">Pareto front</div><div class="live-val" style="color:#b57bee">{len(hist["front0"])} gen</div></div>'
+            f'</div>', unsafe_allow_html=True)
+        log_slot.markdown('<div class="log-box">' + "<br>".join(log_rows) + "</div>",
+                          unsafe_allow_html=True)
+
+    elapsed = time.time() - t0
+    prog.progress(1.0, text=f"✓  Done in {elapsed:.1f}s — Pareto front: {len(pareto_front)} solutions")
+    live_slot.empty()
+    st.session_state.results = dict(
+        audio=audio, sr=sample_rate, watermark=watermark,
+        hof=hof, hist=hist, pareto_front=pareto_front,
+        final_pop=final_pop, b_snr=b_snr, b_acc=b_acc,
+        audio_src=audio_src,
+        audio_name=uploaded_wav.name if audio_src == "Upload WAV" and uploaded_wav else None)
+    st.rerun()
+
+if st.session_state.results:
+    R       = st.session_state.results
+    hof     = R["hof"]
+    h       = R["hist"]
+    audio   = R["audio"]
+    sr_val  = R["sr"]
+    wm      = R["watermark"]
+    wm_opt  = embed_watermark(audio, wm, hof.alpha, hof.band, hof.n_carriers)
+    d_snr   = hof.snr - R["b_snr"]
+    d_acc   = (hof.acc - R["b_acc"]) * 100
+    noise   = wm_opt - audio
+
+    # ── Source banner ─────────────────────────────────────────────
+    if R.get("audio_src") == "Upload WAV" and R.get("audio_name"):
+        st.info(f"🎵 Real audio — **{R['audio_name']}**  ·  "
+                f"{len(audio)/sr_val:.2f}s  ·  {sr_val} Hz  ·  {len(audio):,} samples")
+
+    # ── Metric cards ──────────────────────────────────────────────
+    st.markdown('<div class="sec">📊 Results</div>', unsafe_allow_html=True)
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    with c1: st.markdown(mcard("SNR", f"{hof.snr:.1f} dB",
+        f"{d_snr:+.1f} dB vs baseline", d_snr >= 0, "#ff6b6b"), unsafe_allow_html=True)
+    with c2: st.markdown(mcard("Bit Accuracy", f"{hof.acc*100:.1f}%",
+        f"{d_acc:+.1f}% vs baseline", d_acc >= 0, "#6dffa0"), unsafe_allow_html=True)
+    with c3: st.markdown(mcard("Alpha", f"{hof.alpha:.5f}",
+        "embedding strength", True, "#00d4ff"), unsafe_allow_html=True)
+    with c4: st.markdown(mcard("Band", f"{hof.band:.3f}",
+        "0=narrow  1=full", True, "#ffcc44"), unsafe_allow_html=True)
+    with c5: st.markdown(mcard("n_carriers", str(hof.n_carriers),
+        "per bit", True, "#b57bee"), unsafe_allow_html=True)
+    with c6: st.markdown(mcard("Pareto front", str(len(R["pareto_front"])),
+        "solutions", True, "#8890aa"), unsafe_allow_html=True)
+
+    st.markdown(gene_html(hof), unsafe_allow_html=True)
+    st.markdown("<div style='margin:.6rem 0'></div>", unsafe_allow_html=True)
+
+    # ── Tabs ──────────────────────────────────────────────────────
+    t1, t2, t3, t4, t5 = st.tabs([
+        "🌊  Waveforms",
+        "📈  Convergence",
+        "🎯  Pareto Front",
+        "🔬  Gene Sweeps",
+        "🔢  Bit Recovery",
+    ])
+
+    with t1:
+        st.plotly_chart(chart_waves(audio, wm_opt, sr_val), use_container_width=True)
+        ca, cb, cc = st.columns(3)
+        with ca:
+            st.markdown(
+                '<div class="audio-card"><div class="audio-card-lbl">'
+                '<span class="dot" style="background:#00d4ff"></span> Original</div></div>',
+                unsafe_allow_html=True)
+            st.audio(to_wav(audio, sr_val), format="audio/wav")
+        with cb:
+            st.markdown(
+                '<div class="audio-card"><div class="audio-card-lbl">'
+                '<span class="dot" style="background:#ff6b6b"></span> Watermarked</div></div>',
+                unsafe_allow_html=True)
+            st.audio(to_wav(wm_opt, sr_val), format="audio/wav")
+        with cc:
+            st.markdown(
+                '<div class="audio-card"><div class="audio-card-lbl">'
+                '<span class="dot" style="background:#6dffa0"></span> '
+                f'Noise signal  <span style="color:#ffcc44;font-family:monospace">'
+                f'RMS {np.sqrt(np.mean(noise**2))*100:.3f}%</span></div></div>',
+                unsafe_allow_html=True)
+            st.audio(to_wav(noise * 10, sr_val), format="audio/wav")
+
+        # Download button
+        st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
+        st.download_button(
+            "⬇️  Download watermarked audio",
+            data=to_wav(wm_opt, sr_val),
+            file_name="watermarked.wav",
+            mime="audio/wav",
+            use_container_width=False,
+        )
+
+    with t2:
+        col1, col2 = st.columns([3, 2])
+        with col1: st.plotly_chart(chart_convergence(h), use_container_width=True)
+        with col2: st.plotly_chart(chart_front_size(h), use_container_width=True)
+
+    with t3:
+        st.plotly_chart(chart_pareto(R["final_pop"], R["pareto_front"], hof),
+                        use_container_width=True)
+
+    with t4:
+        col3, col4 = st.columns(2)
+        with col3: st.plotly_chart(chart_sweep(audio, wm, hof, "alpha"), use_container_width=True)
+        with col4: st.plotly_chart(chart_sweep(audio, wm, hof, "band"),  use_container_width=True)
+
+    with t5:
+        st.plotly_chart(chart_bits(audio, wm, hof), use_container_width=True)
+
+else:
+    st.markdown("""
+    <div style="text-align:center;padding:40px 0 24px 0">
+      <div style="font-size:3rem;margin-bottom:10px">🧬</div>
+      <div style="font-size:1.2rem;font-weight:800;color:#dde1f0;margin-bottom:6px">
+        Configure the sidebar and press <span style="color:#00d4ff">▶ Run GA</span>
+      </div>
+      <div style="color:#8890aa;font-size:.88rem">
+        The GA will evolve a 3-gene chromosome and build a true Pareto front.
+      </div>
+    </div>
+    <div class="feat-grid">
+      <div class="feat-card">
+        <div class="feat-icon">🔇</div>
+        <div class="feat-title">Imperceptible Embedding</div>
+        <div class="feat-desc">Spread-spectrum carriers keep the watermark inaudible.
+        SNR is maximised as a first-class objective — not a constraint.</div>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">🛡️</div>
+        <div class="feat-title">Noise Robustness</div>
+        <div class="feat-desc">Bit accuracy is evaluated after a Gaussian noise attack,
+        driving the GA to find embeddings that survive real-world degradation.</div>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">🎯</div>
+        <div class="feat-title">True Pareto Front</div>
+        <div class="feat-desc">Non-dominated sorting + crowding distance — no weighted sum.
+        The output is a full trade-off curve you can navigate.</div>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">🎵</div>
+        <div class="feat-title">Real Audio Support</div>
+        <div class="feat-desc">Upload your own WAV, AIFF, or FLAC file.
+        Automatic mono conversion and resampling included.</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
