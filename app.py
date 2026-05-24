@@ -385,7 +385,7 @@ def gene_html(hof):
 PRESET_LABELS = {
     "Quick": "quick",
     "Balanced": "balanced",
-    "Complete": "complete",
+  "Complete": "thorough",
 }
 
 if "preset" not in st.session_state or st.session_state.preset not in PRESET_LABELS:

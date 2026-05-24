@@ -2,8 +2,23 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os, sys, time, argparse, io
 
+# Optional dependencies
+try:
+    import soundfile as sf
+    _HAS_SF = True
+except ImportError:
+    _HAS_SF = False
 
-class Colors:
+try:
+    from scipy.signal import resample as scipy_resample
+    _HAS_SCIPY = True
+except ImportError:
+    _HAS_SCIPY = False
+
+
+# Terminal colors
+
+class C:
     RESET   = "\033[0m"
     BOLD    = "\033[1m"
     DIM     = "\033[2m"
@@ -26,28 +41,28 @@ def _bar(frac, width=14, fill="█", empty="░", color=None):
     filled = int(round(frac * width))
     bar    = fill * filled + empty * (width - filled)
     if color:
-        return f"{color}{bar}{Colors.RESET}"
+        return f"{color}{bar}{C.RESET}"
     return bar
 
 def _hbar(frac, width=30, color=None):
     b = _bar(frac, width=width, color=color)
-    return f"{b} {Colors.BWHITE}{frac*100:5.1f}%{Colors.RESET}"
+    return f"{b} {C.BWHITE}{frac*100:5.1f}%{C.RESET}"
 
 BANNER = (
-    f"\n{Colors.BCYAN}{Colors.BOLD}"
+    f"\n{C.BCYAN}{C.BOLD}"
     "  ███╗   ███╗ █████╗ ██████╗ ██╗  ██╗██╗ ██████╗ \n"
     "  ████╗ ████║██╔══██╗██╔══██╗██║ ██╔╝██║██╔═══██╗\n"
     "  ██╔████╔██║███████║██████╔╝█████╔╝ ██║██║   ██║\n"
     "  ██║╚██╔╝██║██╔══██║██╔══██╗██╔═██╗ ██║██║   ██║\n"
     "  ██║ ╚═╝ ██║██║  ██║██║  ██║██║  ██╗██║╚██████╔╝\n"
     "  ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝ ╚═════╝ \n"
-    f"{Colors.RESET}"
-    f"{Colors.BMAGENTA}"
+    f"{C.RESET}"
+    f"{C.BMAGENTA}"
     "  ╔══════════════════════════════════════════════════════════════════════════════╗\n"
     "  ║  MULTI-OBJECTIVE GENETIC ALGORITHM  ·  AUDIO WATERMARK OPTIMIZATION ENGINE  ║\n"
     "  ║  Chromosome: [alpha · band · n_carriers]  ·  True Pareto-Optimal Front      ║\n"
     "  ╚══════════════════════════════════════════════════════════════════════════════╝\n"
-    f"{Colors.RESET}"
+    f"{C.RESET}"
 )
 
 def print_banner():
@@ -55,16 +70,16 @@ def print_banner():
 
 def _section(title, icon="◈"):
     W = 74
-    cprint(f"\n{Colors.BCYAN}{'─'*2} {Colors.BOLD}{Colors.BWHITE}{icon} {title} "
-           f"{Colors.RESET}{Colors.BCYAN}{'─'*max(0, W-len(title)-4)}{Colors.RESET}")
+    cprint(f"\n{C.BCYAN}{'─'*2} {C.BOLD}{C.BWHITE}{icon} {title} "
+           f"{C.RESET}{C.BCYAN}{'─'*max(0, W-len(title)-4)}{C.RESET}")
 
-def _kv(key, val, kw=24, key_c=Colors.CYAN, val_c=Colors.BWHITE):
-    cprint(f"  {key_c}{key:<{kw}}{Colors.RESET}{val_c}{val}{Colors.RESET}")
+def _kv(key, val, kw=24, key_c=C.CYAN, val_c=C.BWHITE):
+    cprint(f"  {key_c}{key:<{kw}}{C.RESET}{val_c}{val}{C.RESET}")
 
-def _ok(msg):   cprint(f"  {Colors.BGREEN}✔  {Colors.RESET}{msg}")
-def _warn(msg): cprint(f"  {Colors.BYELLOW}⚠  {Colors.RESET}{msg}")
-def _err(msg):  cprint(f"  {Colors.BRED}✘  {Colors.RESET}{msg}")
-def _info(msg): cprint(f"  {Colors.BCYAN}╌  {Colors.RESET}{msg}")
+def _ok(msg):   cprint(f"  {C.BGREEN}✔  {C.RESET}{msg}")
+def _warn(msg): cprint(f"  {C.BYELLOW}⚠  {C.RESET}{msg}")
+def _err(msg):  cprint(f"  {C.BRED}✘  {C.RESET}{msg}")
+def _info(msg): cprint(f"  {C.BCYAN}╌  {C.RESET}{msg}")
 
 
 # Audio I/O
@@ -105,7 +120,7 @@ def load_real_audio(source, target_sr):
     return np.clip(sig, -1.0, 1.0), target_sr
 
 
-
+# Signal processing
 
 def generate_audio(duration=2.0, sample_rate=8000, seed=42):
     rng = np.random.default_rng(seed)
@@ -116,7 +131,6 @@ def generate_audio(duration=2.0, sample_rate=8000, seed=42):
            0.08 * rng.standard_normal(len(t)))
     return sig / np.max(np.abs(sig)), sample_rate
 
-# Signal processing
 
 def prepare_audio_source(source_mode, audio_file=None, sample_rate=8000, duration=2.0):
     if source_mode not in {"generate", "wav"}:
@@ -142,11 +156,11 @@ def generate_watermark(length=64, seed=7):
 
 def _make_carrier(seg_len, band, carrier_seed):
     rng    = np.random.default_rng(carrier_seed)
-    Colors      = rng.standard_normal(seg_len)
+    c      = rng.standard_normal(seg_len)
     window = max(1, int((1.0 - band) * seg_len * 0.15))
     if window > 1:
-        Colors = np.convolve(Colors, np.ones(window) / window, mode="same")
-    return Colors / (np.linalg.norm(Colors) + 1e-9)
+        c = np.convolve(c, np.ones(window) / window, mode="same")
+    return c / (np.linalg.norm(c) + 1e-9)
 
 
 def embed_watermark(audio, watermark, alpha, band=1.0, n_carriers=1):
@@ -158,8 +172,8 @@ def embed_watermark(audio, watermark, alpha, band=1.0, n_carriers=1):
         s, e   = i * seg_len, (i + 1) * seg_len
         symbol = 1.0 if bit else -1.0
         for k in range(nc):
-            Colors = _make_carrier(e - s, band, i * 4 + k)
-            out[s:e] += (alpha / nc) * symbol * Colors
+            c = _make_carrier(e - s, band, i * 4 + k)
+            out[s:e] += (alpha / nc) * symbol * c
     return np.clip(out, -1.0, 1.0)
 
 
@@ -382,39 +396,39 @@ class GeneticAlgorithm:
     # Dashboard
     def _render_panel(self, gen, hof, front0_size, div, note, elapsed):
         pct  = (gen + 1) / self.G
-        prog = _bar(pct, width=32, color=Colors.BCYAN)
+        prog = _bar(pct, width=32, color=C.BCYAN)
 
         # Gene bars
         an = (hof.alpha - 0.001) / (0.15 - 0.001)
         bn = hof.band
         nn = (hof.genes[2] - 1.0) / 2.0
 
-        inj_badge = (f"  {Colors.BMAGENTA}⚡ INJECT ×{note.split()[1]}{Colors.RESET}"
+        inj_badge = (f"  {C.BMAGENTA}⚡ INJECT ×{note.split()[1]}{C.RESET}"
                      if note else "")
 
         lines = [
-            f"  {Colors.DIM}{'─' * 72}{Colors.RESET}",
-            (f"  {Colors.BOLD}{Colors.BCYAN}GEN {gen+1:>4} / {self.G:<4}{Colors.RESET}"
-             f"  {prog}  {Colors.DIM}{elapsed:6.1f}s{Colors.RESET}{inj_badge}"),
+            f"  {C.DIM}{'─' * 72}{C.RESET}",
+            (f"  {C.BOLD}{C.BCYAN}GEN {gen+1:>4} / {self.G:<4}{C.RESET}"
+             f"  {prog}  {C.DIM}{elapsed:6.1f}s{C.RESET}{inj_badge}"),
             "",
-            (f"  {Colors.BRED}SNR{Colors.RESET}  "
-             f"{_bar(hof.snr / 60.0, width=18, color=Colors.BRED)}"
-             f"  {Colors.BOLD}{Colors.BRED}{hof.snr:6.2f} dB{Colors.RESET}"
-             f"       {Colors.BGREEN}ACC{Colors.RESET}  "
-             f"{_bar(hof.acc, width=18, color=Colors.BGREEN)}"
-             f"  {Colors.BOLD}{Colors.BGREEN}{hof.acc*100:5.1f}%{Colors.RESET}"),
+            (f"  {C.BRED}SNR{C.RESET}  "
+             f"{_bar(hof.snr / 60.0, width=18, color=C.BRED)}"
+             f"  {C.BOLD}{C.BRED}{hof.snr:6.2f} dB{C.RESET}"
+             f"       {C.BGREEN}ACC{C.RESET}  "
+             f"{_bar(hof.acc, width=18, color=C.BGREEN)}"
+             f"  {C.BOLD}{C.BGREEN}{hof.acc*100:5.1f}%{C.RESET}"),
             "",
-            (f"  {Colors.CYAN}alpha{Colors.RESET}  {_bar(an, width=10, color=Colors.BCYAN)}"
-             f"  {Colors.BCYAN}{hof.alpha:.5f}{Colors.RESET}"
-             f"    {Colors.YELLOW}band{Colors.RESET}  {_bar(bn, width=10, color=Colors.BYELLOW)}"
-             f"  {Colors.BYELLOW}{hof.band:.3f}{Colors.RESET}"
-             f"    {Colors.MAGENTA}nc{Colors.RESET}  {_bar(nn, width=8, color=Colors.BMAGENTA)}"
-             f"  {Colors.BMAGENTA}{hof.n_carriers}{Colors.RESET}"),
+            (f"  {C.CYAN}alpha{C.RESET}  {_bar(an, width=10, color=C.BCYAN)}"
+             f"  {C.BCYAN}{hof.alpha:.5f}{C.RESET}"
+             f"    {C.YELLOW}band{C.RESET}  {_bar(bn, width=10, color=C.BYELLOW)}"
+             f"  {C.BYELLOW}{hof.band:.3f}{C.RESET}"
+             f"    {C.MAGENTA}nc{C.RESET}  {_bar(nn, width=8, color=C.BMAGENTA)}"
+             f"  {C.BMAGENTA}{hof.n_carriers}{C.RESET}"),
             "",
-            (f"  {Colors.DIM}front₀ size={front0_size:<4}"
+            (f"  {C.DIM}front₀ size={front0_size:<4}"
              f"  diversity={div:.5f}"
-             f"  score={hof.balanced_score():.5f}{Colors.RESET}"),
-            f"  {Colors.DIM}{'─' * 72}{Colors.RESET}",
+             f"  score={hof.balanced_score():.5f}{C.RESET}"),
+            f"  {C.DIM}{'─' * 72}{C.RESET}",
         ]
 
         # Redraw panel
@@ -506,11 +520,11 @@ class GeneticAlgorithm:
         if self.verbose:
             cprint()
             _section("HALL OF FAME", "★")
-            _kv("alpha  (embed strength)", f"{hof.alpha:.6f}",   key_c=Colors.BCYAN)
-            _kv("band   (carrier BW)",     f"{hof.band:.4f}",    key_c=Colors.BYELLOW)
-            _kv("n_carriers  (per bit)",   str(hof.n_carriers),  key_c=Colors.BMAGENTA)
-            _kv("SNR",                     f"{hof.snr:.3f} dB",  key_c=Colors.BRED)
-            _kv("Bit Accuracy",            f"{hof.acc*100:.2f}%",key_c=Colors.BGREEN)
+            _kv("alpha  (embed strength)", f"{hof.alpha:.6f}",   key_c=C.BCYAN)
+            _kv("band   (carrier BW)",     f"{hof.band:.4f}",    key_c=C.BYELLOW)
+            _kv("n_carriers  (per bit)",   str(hof.n_carriers),  key_c=C.BMAGENTA)
+            _kv("SNR",                     f"{hof.snr:.3f} dB",  key_c=C.BRED)
+            _kv("Bit Accuracy",            f"{hof.acc*100:.2f}%",key_c=C.BGREEN)
             _kv("Balanced Score",          f"{hof.balanced_score():.5f}")
             _kv("Pareto front size",       str(len(pareto_front)))
             _kv("Diversity injections",    str(len(hist["restarts"])))
@@ -558,7 +572,7 @@ def plot_results(audio, watermark, hof, pareto_front, final_pop, hist, sr,
         path = os.path.join(out_dir, fname)
         fig.savefig(path, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
         plt.close(fig)
-        _ok(f"Saved  {Colors.DIM}{path}{Colors.RESET}")
+        _ok(f"Saved  {C.DIM}{path}{C.RESET}")
 
     t   = np.linspace(0, len(audio) / sr, len(audio))
     gen = np.arange(1, len(hist["hof_snr"]) + 1)
@@ -638,8 +652,8 @@ def plot_results(audio, watermark, hof, pareto_front, final_pop, hist, sr,
     sweep_a = np.linspace(0.001, 0.15, 50)
     sw_snr, sw_acc = [], []
     for a in sweep_a:
-        s, Colors = compute_objectives(a, hof.band, hof.n_carriers, audio, watermark)
-        sw_snr.append(s); sw_acc.append(Colors*100)
+        s, c = compute_objectives(a, hof.band, hof.n_carriers, audio, watermark)
+        sw_snr.append(s); sw_acc.append(c*100)
     ax.plot(sweep_a, sw_snr, color=CORAL, lw=1.4, label="SNR (dB)")
     axr = ax.twinx()
     axr.plot(sweep_a, sw_acc, color=GREEN, lw=1.4, ls="--", label="Acc (%)")
@@ -657,8 +671,8 @@ def plot_results(audio, watermark, hof, pareto_front, final_pop, hist, sr,
     sweep_b = np.linspace(0.0, 1.0, 30)
     sb_snr, sb_acc = [], []
     for b in sweep_b:
-        s, Colors = compute_objectives(hof.alpha, b, hof.n_carriers, audio, watermark)
-        sb_snr.append(s); sb_acc.append(Colors*100)
+        s, c = compute_objectives(hof.alpha, b, hof.n_carriers, audio, watermark)
+        sb_snr.append(s); sb_acc.append(c*100)
     ax.plot(sweep_b, sb_snr, color=CORAL, lw=1.4, label="SNR (dB)")
     axr = ax.twinx()
     axr.plot(sweep_b, sb_acc, color=GREEN, lw=1.4, ls="--", label="Acc (%)")
@@ -688,19 +702,19 @@ def build_parser():
         add_help=True,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=(
-            f"{Colors.BCYAN}{Colors.BOLD}  MO-GA Audio Watermark Optimizer{Colors.RESET}\n"
-            f"{Colors.DIM}  Evolves a 3-gene chromosome [alpha x band x n_carriers]\n"
-            f"  to jointly maximise SNR and Bit Accuracy (true Pareto front).{Colors.RESET}\n\n"
-            f"{Colors.BYELLOW}  Examples:{Colors.RESET}\n"
-            f"    {Colors.BWHITE}python audio_watermarking_ga.py --source generate{Colors.RESET}\n"
-            f"    {Colors.BWHITE}python audio_watermarking_ga.py --source wav --audio track.wav --sr 16000{Colors.RESET}\n"
-            f"    {Colors.BWHITE}python audio_watermarking_ga.py --source generate --preset thorough --bits 128{Colors.RESET}\n"
-            f"    {Colors.BWHITE}python audio_watermarking_ga.py --source generate --pop 80 --gens 200 --seed 1337{Colors.RESET}\n"
-            f"    {Colors.BWHITE}python audio_watermarking_ga.py --source generate --no-plots --quiet{Colors.RESET}\n"
+            f"{C.BCYAN}{C.BOLD}  MO-GA Audio Watermark Optimizer{C.RESET}\n"
+            f"{C.DIM}  Evolves a 3-gene chromosome [alpha x band x n_carriers]\n"
+            f"  to jointly maximise SNR and Bit Accuracy (true Pareto front).{C.RESET}\n\n"
+            f"{C.BYELLOW}  Examples:{C.RESET}\n"
+            f"    {C.BWHITE}python audio_watermarking_ga.py --source generate{C.RESET}\n"
+            f"    {C.BWHITE}python audio_watermarking_ga.py --source wav --audio track.wav --sr 16000{C.RESET}\n"
+            f"    {C.BWHITE}python audio_watermarking_ga.py --source generate --preset thorough --bits 128{C.RESET}\n"
+            f"    {C.BWHITE}python audio_watermarking_ga.py --source generate --pop 80 --gens 200 --seed 1337{C.RESET}\n"
+            f"    {C.BWHITE}python audio_watermarking_ga.py --source generate --no-plots --quiet{C.RESET}\n"
         ),
     )
 
-    aud = p.add_argument_group(f"{Colors.CYAN}audio{Colors.RESET}")
+    aud = p.add_argument_group(f"{C.CYAN}audio{C.RESET}")
     aud.add_argument("--source", choices=["generate", "wav"], required=True,
                      help="Required audio source: generate synthetic audio or load a real audio file.")
     aud.add_argument("--audio", metavar="FILE",
@@ -714,7 +728,7 @@ def build_parser():
                      choices=[16, 32, 64, 128],
                      help="Watermark length in bits  (default: 64)")
 
-    ga = p.add_argument_group(f"{Colors.CYAN}genetic algorithm{Colors.RESET}")
+    ga = p.add_argument_group(f"{C.CYAN}genetic algorithm{C.RESET}")
     ga.add_argument("--preset", choices=list(PRESETS.keys()), default=None,
                     help="Named preset: quick / balanced / thorough")
     ga.add_argument("--pop",  type=int,   default=None, metavar="N",
@@ -734,7 +748,7 @@ def build_parser():
     ga.add_argument("--seed", type=int, default=0, metavar="N",
                     help="RNG seed  (default: 0)")
 
-    out = p.add_argument_group(f"{Colors.CYAN}output{Colors.RESET}")
+    out = p.add_argument_group(f"{C.CYAN}output{C.RESET}")
     out.add_argument("--output-dir", default="./outputs", metavar="DIR",
                      help="Directory for saved plots  (default: ./outputs)")
     out.add_argument("--no-plots", action="store_true",
@@ -781,12 +795,12 @@ def main():
             _err(f"File not found: {args.audio}")
             sys.exit(1)
         if not args.quiet:
-            _info(f"Loading  {Colors.BWHITE}{args.audio}{Colors.RESET}  ->  target SR {args.sr} Hz")
+            _info(f"Loading  {C.BWHITE}{args.audio}{C.RESET}  ->  target SR {args.sr} Hz")
         audio, sr, src_label = prepare_audio_source("wav", args.audio, args.sr, args.duration)
     else:
         if not args.quiet:
             _info(f"Generating synthetic signal  "
-                  f"{Colors.BWHITE}{args.duration}s{Colors.RESET}  @  {args.sr} Hz  seed=42")
+                  f"{C.BWHITE}{args.duration}s{C.RESET}  @  {args.sr} Hz  seed=42")
         audio, sr, src_label = prepare_audio_source("generate", None, args.sr, args.duration)
 
     watermark = generate_watermark(length=args.bits)
@@ -803,8 +817,8 @@ def main():
 
     if not args.quiet:
         _kv("alpha=0.05  band=1.0  nc=1",
-            f"SNR {Colors.BRED}{b_snr:.2f} dB{Colors.RESET}  "
-            f"Acc {Colors.BGREEN}{b_acc*100:.1f}%{Colors.RESET}")
+            f"SNR {C.BRED}{b_snr:.2f} dB{C.RESET}  "
+            f"Acc {C.BGREEN}{b_acc*100:.1f}%{C.RESET}")
         cprint()
         _section("GA CONFIG", "▸")
         _kv("Population",  str(cfg["pop_size"]))
@@ -827,8 +841,8 @@ def main():
         _section("DELTA VS BASELINE", "D")
         d_snr = hof.snr - b_snr
         d_acc = (hof.acc - b_acc) * 100
-        _kv("DSNR", f"{Colors.BGREEN if d_snr>=0 else Colors.BRED}{d_snr:+.3f} dB{Colors.RESET}")
-        _kv("DAcc", f"{Colors.BGREEN if d_acc>=0 else Colors.BRED}{d_acc:+.2f}%{Colors.RESET}")
+        _kv("DSNR", f"{C.BGREEN if d_snr>=0 else C.BRED}{d_snr:+.3f} dB{C.RESET}")
+        _kv("DAcc", f"{C.BGREEN if d_acc>=0 else C.BRED}{d_acc:+.2f}%{C.RESET}")
         _kv("Injections", str(len(hist["restarts"])))
 
     # Save plots
@@ -841,8 +855,8 @@ def main():
 
     if not args.quiet:
         cprint()
-        cprint(f"  {Colors.BGREEN}{Colors.BOLD}DONE{Colors.RESET}  "
-               f"{Colors.DIM}Results saved to {args.output_dir}/{Colors.RESET}")
+        cprint(f"  {C.BGREEN}{C.BOLD}DONE{C.RESET}  "
+               f"{C.DIM}Results saved to {args.output_dir}/{C.RESET}")
         cprint()
 
 
