@@ -2,19 +2,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os, sys, time, argparse, io
 
-# Optional dependencies
-try:
-    import soundfile as sf
-    _HAS_SF = True
-except ImportError:
-    _HAS_SF = False
-
-try:
-    from scipy.signal import resample as scipy_resample
-    _HAS_SCIPY = True
-except ImportError:
-    _HAS_SCIPY = False
-
 
 # Terminal colors
 
